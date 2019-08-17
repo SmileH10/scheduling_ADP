@@ -34,9 +34,7 @@ class Job(object):
         self.oper_sqc = oper_sqc[self.pattern][:]  # ['A', 'B', 'C']
         self.next_oper = self.oper_sqc[0]
         self.proc_t = proc_t[self.pattern]
-        self.run_oper = {'A': self.runA(arrt), 'B': self.runB(), 'C': self.runC()}
-
-        self.env.process(self.run_oper[self.next_oper])
+        self.env.process(self.run_arrival(arrt))
 
     def job_select(self, mc_name, rule='SPT'):
         if rule == 'SPT':
@@ -66,66 +64,24 @@ class Job(object):
                 self.machine[mc_name].queue[0] = self.machine[mc_name].queue[best_qloc]
                 self.machine[mc_name].queue[best_qloc] = temp
 
-    def runA(self, arrt):
+    def run_arrival(self, arrt):
         yield self.env.timeout(arrt)
-        print('[A] id: %d (pattern %d) arrives at t = %.2f' % (self.id, self.pattern, self.env.now), self.oper_sqc)
-        with self.machine['A'].request() as req:
+        self.next_oper = self.oper_sqc[0]
+        self.env.process(self.run_mc(self.next_oper))
+
+    def run_mc(self, mc_name):
+        print('[%s] pattern %d (id:%d) arrives at t = %.2f' % (mc_name, self.pattern, self.id, self.env.now))
+        with self.machine[mc_name].request() as req:
             req.obj = self
             yield req
-            print('[A] id: %d starting at t = %.2f' % (self.id, self.env.now))
-            yield self.env.timeout(self.proc_t['A'])
-            print('[A] id: %d leaving at t = %.2f' % (self.id, self.env.now))
-            self.job_select('A', rule='SPT')
-
+            print('[%s] pattern %d (id:%d) starting at t = %.2f' % (mc_name, self.pattern, self.id, self.env.now))
+            yield self.env.timeout(self.proc_t[mc_name])
+            print('[%s] pattern %d (id:%d) leaving at t = %.2f' % (mc_name, self.pattern, self.id, self.env.now))
+            self.job_select(mc_name, rule='SPT')
         del (self.oper_sqc[0])
         if len(self.oper_sqc) > 0:
             self.next_oper = self.oper_sqc[0]
-            self.env.process(self.run_oper[self.next_oper])
-
-    def runB(self):
-        print('[B] id: %d arrives at t = %.2f' % (self.id, self.env.now))
-        with self.machine['B'].request() as req:
-            req.obj = self
-            yield req
-            print('[B] id: %d starting at t = %.2f' % (self.id, self.env.now))
-            yield self.env.timeout(self.proc_t['B'])
-            print('[B] id: %d leaving at t = %.2f' % (self.id, self.env.now))
-            self.job_select('B', rule='SPT')
-
-        del (self.oper_sqc[0])
-        if len(self.oper_sqc) > 0:
-            self.next_oper = self.oper_sqc[0]
-            self.env.process(self.run_oper[self.next_oper])
-
-    def runC(self):
-        print('[C] id: %d arrives at t = %.2f' % (self.id, self.env.now))
-        with self.machine['C'].request() as req:
-            req.obj = self
-            yield req
-            print('[C] id: %d starting at t = %.2f' % (self.id, self.env.now))
-            yield self.env.timeout(self.proc_t['C'])
-            print('[C] id: %d leaving at t = %.2f' % (self.id, self.env.now))
-            self.job_select('C', rule='SPT')
-
-        del (self.oper_sqc[0])
-        if len(self.oper_sqc) > 0:
-            self.next_oper = self.oper_sqc[0]
-            self.env.process(self.run_oper[self.next_oper])
-
-    # def run_mc(self, mc_name):
-    #     print('[%s] id: %d arrives at t = %.2f' % (mc_name, self.id, self.env.now))
-    #     with self.machine[mc_name].request() as req:
-    #         req.obj = self
-    #         yield req
-    #         print('[%s] id: %d starting at t = %.2f' % (mc_name, self.id, self.env.now))
-    #         yield self.env.timeout(self.proc_t[mc_name])
-    #         print('[%s] id: %d leaving at t = %.2f' % (mc_name, self.id, self.env.now))
-    #         self.job_select(mc_name, rule='SPT')
-    #     del (self.oper_sqc[0])
-    #     if len(self.oper_sqc) > 0:
-    #         self.next_oper = self.oper_sqc[0]
-    #         # self.env.process(self.run_oper[self.next_oper])
-    #         self.env.process(self.run_mc(self.next_oper))
+            self.env.process(self.run_mc(self.next_oper))
 
 
 if __name__ == '__main__':
