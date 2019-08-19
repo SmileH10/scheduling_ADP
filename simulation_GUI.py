@@ -1,5 +1,6 @@
 import tkinter as tk
 import tkinter.messagebox
+import tkinter.ttk
 from PIL import ImageTk, Image
 from collections import defaultdict
 
@@ -9,27 +10,26 @@ WIDTH = 16  # 그리드월드 가로
 
 
 class GraphicDisplay(tk.Tk):
-    def __init__(self, env, machine):
+    def __init__(self, env, mc_name_list):
         super(GraphicDisplay, self).__init__()
         self.title('Jobshop Simulation')
-        self.geometry('{0}x{1}'.format(WIDTH * UNIT, HEIGHT * UNIT + 50))
-        self.shapes = self.load_images()
+        self.geometry('{0}x{1}'.format(WIDTH * UNIT, HEIGHT * UNIT + 100))
+        self.backgroundimg, self.jobsimg = self.load_images()
         self.canvas = self._build_canvas()
-        # self.canvas.create_image(0, 0, image=self.shapes[3])
-        # self.canvas.create_text(0, 0, text=str(self.agent.id))
 
         self.env = env  # simpy.Environment()
-        self.machine = machine
-        self.mc_name_list = self.machine.keys()
+        self.iter = 0
+        self.mc_name_list = mc_name_list
         self.event_cnt = 0
         self.is_moving = 0
 
-        self.data = {}
+        self.data = defaultdict(dict)
 
     def _build_canvas(self):
         canvas = tk.Canvas(self, bg='white',
                            height=HEIGHT * UNIT,
                            width=WIDTH * UNIT)
+        canvas.create_image(WIDTH * UNIT / 2, HEIGHT * UNIT / 2, image=self.backgroundimg)
 
         run_entire_button = tk.Button(self, text="Run(entire)", command=self.run_entire)
         run_entire_button.configure(width=10, activebackground="#33B5E5")
@@ -43,22 +43,23 @@ class GraphicDisplay(tk.Tk):
         run_reset_button = tk.Button(self, text="reset", command=self.run_reset)
         run_reset_button.configure(width=10, activebackground="#33B5E5")
         canvas.create_window(WIDTH * UNIT * 0.87, HEIGHT * UNIT + 10, window=run_reset_button)
-        self.time_text = canvas.create_text(10, 10, text="time = 0.00", font=('Helvetica', '10', 'normal'), anchor="nw")
-        self.status_text = canvas.create_text(UNIT, UNIT, text="empty status", font=('Helvetica', '10', 'normal'), anchor="nw")
 
-        canvas.create_image(WIDTH * UNIT / 2, HEIGHT * UNIT / 2, image=self.shapes[0])
-        # canvas.create_image(3.53 * UNIT, 1 * UNIT, image=self.shapes[1][0])
-        # canvas.create_text(3.53 * UNIT, 1 * UNIT, text='4')
-        # self.rectangle = canvas.create_image(50, 50, image=self.shapes[0])
+        # iter_plus_button = tk.Button(self, text="iter+", command=self.iter_plus)
+        # iter_plus_button.configure(width=10, activebackground="#33B5E5")
+        # canvas.create_window(WIDTH * UNIT * 0.87, HEIGHT * UNIT + 11, window=iter_plus_button)
+
+        self.time_text = canvas.create_text(10, 10, text="time = 0.00", font=('Helvetica', '10', 'normal'), anchor="nw")
+
+
 
         canvas.pack()
         return canvas
 
-    def save_status(self, time, status):
-        if self.event_cnt == 0 or self.datastatus != status:
-            self.data[self.event_cnt] = (time, status)
+    def save_status(self, simiter, time, status):
+        if self.event_cnt == 0 or self.previous_status != status:
+            self.data[simiter][self.event_cnt] = (time, status)
             self.event_cnt += 1
-            self.datastatus = status
+            self.previous_status = status
 
     def printing_time(self, sim_t, font='Helvetica', size=12, style='normal', anchor="nw"):
         time_str = "time = %.2f" % sim_t
@@ -66,12 +67,6 @@ class GraphicDisplay(tk.Tk):
         self.canvas.delete(self.time_text)
         self.time_text = self.canvas.create_text(10, 10, fill="black", text=time_str, font=font, anchor=anchor)
         return self.time_text
-
-    def printing_status(self, status, font='Helvetica', size=10, style='normal', anchor="nw"):
-        status_str = "".join([str(status[i]) for i in range(len(status))])
-        font = (font, str(size), style)
-        self.canvas.delete(self.status_text)
-        self.status_text = self.canvas.create_text(UNIT, UNIT, fill="black", text=status_str, font=font, anchor=anchor)
 
     def draw_status(self, status):
         # delete every previous drawing
@@ -94,7 +89,7 @@ class GraphicDisplay(tk.Tk):
             # job using resources
             if status['mc_users'][mc] != 'empty':
                 self.mc_users[mc]['image'] = self.canvas.create_image(self.locx(mc), self.locy(mc),
-                                                                      image=self.shapes[1][status['mc_users'][mc].pattern])
+                                                                      image=self.jobsimg[status['mc_users'][mc].pattern])
                 self.mc_users[mc]['text'] = self.canvas.create_text(self.locx(mc), self.locy(mc),
                                                                     text=str(status['mc_users'][mc].id))
             # jobs in queues
@@ -102,18 +97,22 @@ class GraphicDisplay(tk.Tk):
                 x = self.locx(mc) - 40
                 for job in status['mc_queue'][mc].keys():
                     self.mc_queue[mc][job] = {'image': self.canvas.create_image(x, self.locy(mc) - 12,
-                                                                                image=self.shapes[1][status['mc_queue'][mc][job].pattern]),
+                                                                                image=self.jobsimg[status['mc_queue'][mc][job].pattern]),
                                               'text': self.canvas.create_text(x, self.locy(mc) - 12,
                                                                               text=str(status['mc_queue'][mc][job].id))
                                               }
                     x -= 15
-
-
-    def locx(self, mc):
+    @staticmethod
+    def locx(mc):
         if mc == 'A' or mc == 'B' or mc == 'C':
             return 3.53 * UNIT
+        elif mc == 'D' or mc == 'E' or mc == 'F':
+            return 9.52 * UNIT
+        elif mc == 'G' or mc == 'I' or mc == 'J':
+            return 15.5 * UNIT
 
-    def locy(self, mc):
+    @staticmethod
+    def locy(mc):
         if mc == 'A' or mc == 'D' or mc == 'G':
             return 1 * UNIT
         elif mc == 'B' or mc == 'E' or mc == 'I':
@@ -132,26 +131,26 @@ class GraphicDisplay(tk.Tk):
     def run_entire(self):
         while self.is_moving != 1:
             self.is_moving = 1
-            while self.event_cnt <= len(self.data) - 2:
-                current_time = self.data[self.event_cnt][0]
-                next_time = self.data[self.event_cnt + 1][0]
+            while self.event_cnt <= len(self.data[self.iter]) - 2:
+                current_time = self.data[self.iter][self.event_cnt][0]
+                next_time = self.data[self.iter][self.event_cnt + 1][0]
                 self.after(100 * (next_time - current_time), self.run_onestep_forward())
                 self.update()
         self.is_moving = 0
 
     def run_onestep_forward(self):
-        if -1 <= self.event_cnt <= len(self.data) - 2:
+        if -1 <= self.event_cnt <= len(self.data[self.iter]) - 2:
             self.event_cnt += 1
-            time, status = self.data[self.event_cnt]
+            time, status = self.data[self.iter][self.event_cnt]
             self.printing_time(time)
             self.draw_status(status)
         else:
             tk.messagebox.showwarning("Error", "simulation ends")
 
     def run_onestep_backward(self):
-        if 1 <= self.event_cnt <= len(self.data):
+        if 1 <= self.event_cnt <= len(self.data[self.iter]):
             self.event_cnt -= 1
-            time, status = self.data[self.event_cnt]
+            time, status = self.data[self.iter][self.event_cnt]
             self.printing_time(time)
             self.draw_status(status)
         else:
@@ -159,12 +158,14 @@ class GraphicDisplay(tk.Tk):
 
     def run_reset(self):
         self.event_cnt = 0
-        time, status = self.data[self.event_cnt]
+        time, status = self.data[self.iter][self.event_cnt]
         self.printing_time(time)
         self.draw_status(status)
 
+    def iter_plus(self):
+        self.iter += 1
+        self.run_reset()
+
 
 if __name__ == '__main__':
-    test = 0
-    gd = GraphicDisplay(test)
-    gd.mainloop()
+    pass
