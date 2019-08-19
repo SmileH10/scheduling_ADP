@@ -1,6 +1,7 @@
 import tkinter as tk
 import tkinter.messagebox
 from PIL import ImageTk, Image
+from collections import defaultdict
 
 UNIT = 50  # 픽셀 수
 HEIGHT = 8  # 그리드월드 세로
@@ -8,7 +9,7 @@ WIDTH = 16  # 그리드월드 가로
 
 
 class GraphicDisplay(tk.Tk):
-    def __init__(self, env):
+    def __init__(self, env, machine):
         super(GraphicDisplay, self).__init__()
         self.title('Jobshop Simulation')
         self.geometry('{0}x{1}'.format(WIDTH * UNIT, HEIGHT * UNIT + 50))
@@ -18,6 +19,8 @@ class GraphicDisplay(tk.Tk):
         # self.canvas.create_text(0, 0, text=str(self.agent.id))
 
         self.env = env  # simpy.Environment()
+        self.machine = machine
+        self.mc_name_list = self.machine.keys()
         self.event_cnt = 0
         self.is_moving = 0
 
@@ -44,8 +47,8 @@ class GraphicDisplay(tk.Tk):
         self.status_text = canvas.create_text(UNIT, UNIT, text="empty status", font=('Helvetica', '10', 'normal'), anchor="nw")
 
         canvas.create_image(WIDTH * UNIT / 2, HEIGHT * UNIT / 2, image=self.shapes[0])
-        canvas.create_image(3.53 * UNIT, 1 * UNIT, image=self.shapes[1][0])
-        canvas.create_text(3.53 * UNIT, 1 * UNIT, text='4')
+        # canvas.create_image(3.53 * UNIT, 1 * UNIT, image=self.shapes[1][0])
+        # canvas.create_text(3.53 * UNIT, 1 * UNIT, text='4')
         # self.rectangle = canvas.create_image(50, 50, image=self.shapes[0])
 
         canvas.pack()
@@ -57,7 +60,7 @@ class GraphicDisplay(tk.Tk):
             self.event_cnt += 1
             self.datastatus = status
 
-    def printing_time(self, sim_t, font='Helvetica', size=10, style='normal', anchor="nw"):
+    def printing_time(self, sim_t, font='Helvetica', size=12, style='normal', anchor="nw"):
         time_str = "time = %.2f" % sim_t
         font = (font, str(size), style)
         self.canvas.delete(self.time_text)
@@ -71,7 +74,52 @@ class GraphicDisplay(tk.Tk):
         self.status_text = self.canvas.create_text(UNIT, UNIT, fill="black", text=status_str, font=font, anchor=anchor)
 
     def draw_status(self, status):
+        # delete every previous drawing
+        if hasattr(self, 'mc_users'):
+            for mc in self.mc_name_list:
+                if self.mc_users[mc].keys():
+                    self.canvas.delete(self.mc_users[mc]['text'])
+                    self.canvas.delete(self.mc_users[mc]['image'])
+        if hasattr(self, 'mc_queue'):
+            for mc in self.mc_name_list:
+                if self.mc_queue[mc].keys():
+                    for job in self.mc_queue[mc].keys():
+                        self.canvas.delete(self.mc_queue[mc][job]['text'])
+                        self.canvas.delete(self.mc_queue[mc][job]['image'])
+        # initialize
+        self.mc_users = defaultdict(dict)
+        self.mc_queue = defaultdict(dict)
+        # New draw
+        for mc in self.mc_name_list:
+            # job using resources
+            if status['mc_users'][mc] != 'empty':
+                self.mc_users[mc]['image'] = self.canvas.create_image(self.locx(mc), self.locy(mc),
+                                                                      image=self.shapes[1][status['mc_users'][mc].pattern])
+                self.mc_users[mc]['text'] = self.canvas.create_text(self.locx(mc), self.locy(mc),
+                                                                    text=str(status['mc_users'][mc].id))
+            # jobs in queues
+            if status['mc_queue'][mc] != 'empty':
+                x = self.locx(mc) - 40
+                for job in status['mc_queue'][mc].keys():
+                    self.mc_queue[mc][job] = {'image': self.canvas.create_image(x, self.locy(mc) - 12,
+                                                                                image=self.shapes[1][status['mc_queue'][mc][job].pattern]),
+                                              'text': self.canvas.create_text(x, self.locy(mc) - 12,
+                                                                              text=str(status['mc_queue'][mc][job].id))
+                                              }
+                    x -= 15
 
+
+    def locx(self, mc):
+        if mc == 'A' or mc == 'B' or mc == 'C':
+            return 3.53 * UNIT
+
+    def locy(self, mc):
+        if mc == 'A' or mc == 'D' or mc == 'G':
+            return 1 * UNIT
+        elif mc == 'B' or mc == 'E' or mc == 'I':
+            return 4 * UNIT
+        elif mc == 'C' or mc == 'F' or mc == 'J':
+            return 7 * UNIT
 
     @staticmethod
     def load_images():
@@ -79,9 +127,6 @@ class GraphicDisplay(tk.Tk):
         circles = [_ for _ in range(3)]
         for i in range(3):
             circles[i] = ImageTk.PhotoImage(Image.open("./img/circle%d.png" % i).resize((15, 15)))
-        # rectangle = ImageTk.PhotoImage(Image.open("./img/rectangle.png").resize((65, 65)))
-        # triangle = ImageTk.PhotoImage(Image.open("./img/triangle.png").resize((15, 15)))
-        # circle = ImageTk.PhotoImage(Image.open("./img/circle.png").resize((15, 15)))
         return (background, circles)
 
     def run_entire(self):
@@ -99,7 +144,7 @@ class GraphicDisplay(tk.Tk):
             self.event_cnt += 1
             time, status = self.data[self.event_cnt]
             self.printing_time(time)
-            self.printing_status(status)
+            self.draw_status(status)
         else:
             tk.messagebox.showwarning("Error", "simulation ends")
 
@@ -108,7 +153,7 @@ class GraphicDisplay(tk.Tk):
             self.event_cnt -= 1
             time, status = self.data[self.event_cnt]
             self.printing_time(time)
-            self.printing_status(status)
+            self.draw_status(status)
         else:
             tk.messagebox.showwarning("Error", "you're at the simulation starting point")
 
@@ -116,7 +161,7 @@ class GraphicDisplay(tk.Tk):
         self.event_cnt = 0
         time, status = self.data[self.event_cnt]
         self.printing_time(time)
-        self.printing_status(status)
+        self.draw_status(status)
 
 
 if __name__ == '__main__':
