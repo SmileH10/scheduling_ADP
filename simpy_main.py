@@ -1,15 +1,19 @@
 import simpy
 import random
+from simulation_GUI import GraphicDisplay
 
-data = []
+import numpy as np
+from matplotlib import pyplot as plt
+from matplotlib import animation
 
 
 def main():
     env = simpy.Environment()
+    gd = GraphicDisplay(env)
     machine = {}
-    machine['A'] = simpy.Resource(env, capacity=2)
-    machine['B'] = simpy.Resource(env, capacity=1)
-    machine['C'] = simpy.Resource(env, capacity=1)
+    mc_name_list = ['A', 'B', 'C']
+    for mc in mc_name_list:
+        machine[mc] = simpy.Resource(env, capacity=1)
 
     # jobs = []
     arrt = 0
@@ -19,10 +23,17 @@ def main():
         arrt += 1
         Job(env, id, machine, arrt, oper_sqc, proc_t)
         # jobs.append(Job(env, id, machine, arrt, oper_sqc, proc_t))
-    for i in range(1, 300):
-        env.run(until=i)
+    while env.peek() < float("inf"):
+        env.step()
+        if len(machine['A'].queue) > 0:
+            print(machine['A'].queue[0].obj.id)
+        machine_queue = [len(machine[i].queue) for i in mc_name_list]
+        gd.save_status(env.now, machine_queue)
         # GUI sentence. e.g., progressbar.update(i)
+    # for i in range(1, 300): env.run(until=i)
     print("Simulation Complete")
+    gd.run_reset()
+    gd.mainloop()
 
 
 class Job(object):
