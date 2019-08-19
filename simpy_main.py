@@ -2,36 +2,66 @@ import simpy
 import random
 from simulation_GUI import GraphicDisplay
 
+ITERATION = 3
+
 
 def main():
     env = simpy.Environment()
+    mc_name_list = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'I', 'J']
+    gd = GraphicDisplay(env, mc_name_list)
+
     machine = {}
-    mc_name_list = ['A', 'B', 'C']
     for mc in mc_name_list:
         machine[mc] = simpy.Resource(env, capacity=1)
-    gd = GraphicDisplay(env, machine)
 
     arrt = 0
-    oper_sqc = {1: ['A', 'B', 'C'], 2: ['A', 'C']}
-    proc_t = {1: {'A':6, 'B':4, 'C':5}, 2: {'A':10, 'C':10}}
-    for id in range(5):
-        arrt += 1
-        Job(env, id, machine, arrt, oper_sqc, proc_t)
-    while env.peek() < float("inf"):  # for i in range(1, 300): env.run(until=i)
-        env.step()
-        # GUI sentence. e.g., progressbar.update(i)
-        status = {'mc_users': {}, 'mc_queue': {}}
+    oper_sqc = {  # 비응급환자
+                0: ['A', 'B', 'I'],
+                1: ['A', 'B', 'D', 'I'],
+                2: ['A', 'B', 'E', 'I'],
+                3: ['A', 'B', 'C', 'D', 'I'],
+                4: ['A', 'B', 'C', 'J'],
+                5: ['A', 'B', 'D', 'C', 'J'],
+                6: ['A', 'B', 'C', 'I'],
+                7: ['A', 'B', 'D', 'C', 'I'],
+                8: ['A', 'B', 'F', 'I'],
+                9: ['A', 'B', 'C', 'D', 'J'],
+                10: ['A', 'B', 'C', 'E', 'I'],
+                11: ['A', 'B', 'E', 'C', 'J'],
+                  # 응급환자
+                12: ['A', 'B', 'C', 'D', 'E', 'J'],
+                13: ['A', 'B', 'C', 'D', 'E', 'I']
+                }
+    proc_t = {0: {'A': 6, 'B': 4, 'I': 5},
+              1: {'A': 10, 'B': 10, 'D': 10, 'I': 10},
+              2: {'A': 10, 'B': 10, 'E': 15, 'I': 10}
+              }
+
+    for n in range(ITERATION):
+        env = simpy.Environment()
+        machine = {}
         for mc in mc_name_list:
-            status['mc_users'][mc] = machine[mc].users[0].obj if len(machine[mc].users) > 0 else 'empty'
-        for mc in mc_name_list:
-            if len(machine[mc].queue) > 0:
-                status['mc_queue'][mc] = {}
-                for job in range(len(machine[mc].queue)):
-                    status['mc_queue'][mc][job] = machine[mc].queue[job].obj
-            else:
-                status['mc_queue'][mc] = 'empty'
-        gd.save_status(env.now, status)
-    print("Simulation Complete")
+            machine[mc] = simpy.Resource(env, capacity=1)
+        for id in range(10):
+            arrt += 1
+            Job(env, id, machine, arrt, oper_sqc, proc_t)
+        while env.peek() < float("inf"):  # for i in range(1, 300): env.run(until=i)
+            env.step()
+            # GUI sentence. e.g., progressbar.update(i)
+            status = {'mc_users': {}, 'mc_queue': {}}
+            for mc in mc_name_list:
+                status['mc_users'][mc] = machine[mc].users[0].obj if len(machine[mc].users) > 0 else 'empty'
+            for mc in mc_name_list:
+                if len(machine[mc].queue) > 0:
+                    status['mc_queue'][mc] = {}
+                    for job in range(len(machine[mc].queue)):
+                        status['mc_queue'][mc][job] = machine[mc].queue[job].obj
+                else:
+                    status['mc_queue'][mc] = 'empty'
+            gd.save_status(n, env.now, status)
+        print("Simulation [%d] Complete" % n)
+        gd.event_cnt = 0
+    print("All Simulations Complete")
     gd.run_reset()
     gd.mainloop()
 
@@ -41,7 +71,7 @@ class Job(object):
         self.env = env
         self.id = id
         self.machine = machine
-        self.pattern = random.randint(1, 2)
+        self.pattern = random.randint(0, 2)
         self.oper_sqc = oper_sqc[self.pattern][:]  # ['A', 'B', 'C']
         self.next_oper = self.oper_sqc[0]
         self.proc_t = proc_t[self.pattern]
