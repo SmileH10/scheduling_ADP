@@ -20,7 +20,7 @@ class GraphicDisplay(tk.Tk):
 
         self.env = env  # simpy.Environment()
         self.iter = 0
-        self.sim_speed = 100
+        self.sim_speed = 0.01
         self.mc_name_list = mc_name_list
         self.event_cnt = 0
         self.is_moving = 0
@@ -72,17 +72,20 @@ class GraphicDisplay(tk.Tk):
             self.previous_status = status
 
     def printing_time(self, sim_t, font='Helvetica', size=12, style='bold', anchor="nw"):
-        time_str = "time = %.2f" % sim_t
+        hour = sim_t / (60.0 * 60)
+        minute = sim_t % (60.0 * 60) / 60.0
+        second = sim_t % 60.0
+        time_str = "time = %.1f secs (%d : %d : %.1f)" % (sim_t, hour, minute, second)
         font = (font, str(size), style)
         self.canvas.delete(self.time_text)
         self.time_text = self.canvas.create_text(10, 10, fill="black", text=time_str, font=font, anchor=anchor)
 
-    def printing_iter(self, font='Helvetica', size=12, style='bold', anchor="nw"):
+    def printing_iter(self, font='Helvetica', size=12, style='bold', anchor="ne"):
         iter_str = "iteration: %d / %d (Total %d)" % (self.iter, len(self.data.keys()) - 1, len(self.data.keys()))
         font = (font, str(size), style)
         if hasattr(self, 'iter_text'):
             self.canvas.delete(self.iter_text)
-        self.iter_text = self.canvas.create_text(120, 10, fill="black", text=iter_str, font=font, anchor=anchor)
+        self.iter_text = self.canvas.create_text(WIDTH * UNIT - 10, 10, fill="black", text=iter_str, font=font, anchor=anchor)
 
     def draw_status(self, status):
         # delete every previous drawing
@@ -139,10 +142,12 @@ class GraphicDisplay(tk.Tk):
     @staticmethod
     def load_images():
         background = ImageTk.PhotoImage(Image.open("./img/background2.png").resize((WIDTH*UNIT, HEIGHT*UNIT)))
-        circles = []
-        for i in range(3):
-            circles.append(ImageTk.PhotoImage(Image.open("./img/circle%d.png" % i).resize((15, 15))))
-        return background, circles
+        jobsimg = []
+        for i in range(12):
+            jobsimg.append(ImageTk.PhotoImage(Image.open("./img/circle%d.png" % i).resize((15, 15))))
+        for i in range(12):
+            jobsimg.append(ImageTk.PhotoImage(Image.open("./img/triangle%d.png" % i).resize((15, 15))))
+        return background, jobsimg
 
     def run_entire(self):
         self.is_moving = 1
@@ -206,12 +211,12 @@ class GraphicDisplay(tk.Tk):
 
         def check_ok(event=None):
             tk.messagebox.showinfo("simulation speed info", "simulation speed changes to %s" % input_num.get())
-            self.sim_speed = int(input_num.get())
+            self.sim_speed = int(input_num.get()) / 10000.0
             win_entry.destroy()
         input_num = tk.StringVar()
 
         label = tk.Label(win_entry)
-        label.config(text="enter simulation speed \n (integer, the smaller the faster)")
+        label.config(text="enter simulation speed \n (integer, the smaller the faster) \n (default: 100 real_time: 1M)")
         label.pack(ipadx=5, ipady=5)
         textbox = tk.ttk.Entry(win_entry, width=10, textvariable=input_num)
         textbox.pack(ipadx=5, ipady=5)
