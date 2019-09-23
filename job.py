@@ -1,10 +1,11 @@
 import numpy as np
+from time import time
 
 
 class Job(object):
-    def __init__(self, env, qnet, rule, id, machine, arrt, job_ptrn, oper_sqc, proc_t):
+    def __init__(self, simenv, qnet, rule, id, machine, arrt, job_ptrn, oper_sqc, proc_t, pbar):
         self.rule = rule
-        self.env = env
+        self.env = simenv
         self.qnet = qnet
         self.id = id
         self.machine = machine
@@ -20,21 +21,28 @@ class Job(object):
             self.severity = 'ug'
         self.due_rate = {'nug': 5, 'ug': 2}
         self.due_time = self.arrt + self.due_rate[self.severity] * sum(self.proc_t[oper_num] for oper_num in range(len(self.oper_sqc) - 1))
+        self.pbar = pbar
         self.env.process(self.run_arrival(arrt))
 
     def job_select(self, mc_name, rule='SPT'):
+        start1 = time()
+        # print("start job_select")
         if rule == "RL":
             if len(self.machine[mc_name].queue) >= 2:
                 state = self.qnet.get_state()
                 action_list = self.qnet.get_action_list(mc_name=mc_name)  # [[ptrn1, oper_num1], [ptrn2, oper_num2], ..., [ptrn_#inque, oper_num_#inque]]
+                # print('action list: ', action_list)
                 best_value = float("inf")
                 best_action = "None"
                 for action in action_list:
                     val = self.qnet.get_qvalue(state, action)
+                    # print("qval: ", val, val[0][0])
                     if val < best_value:
                         best_value = val
-                        best_action = action_list.index(action)  # 이거 수정해야
+                        best_action = action  # 이거 수정해야
                 assert best_action != "None"
+                # print('best_action: ', best_action)
+                start2 = time()
                 best_qloc = "None"
                 longest_arrt = float("inf")
                 for qjob in self.machine[mc_name].queue:
@@ -46,8 +54,11 @@ class Job(object):
                 temp = self.machine[mc_name].queue[0]
                 self.machine[mc_name].queue[0] = self.machine[mc_name].queue[best_qloc]
                 self.machine[mc_name].queue[best_qloc] = temp
-
+                self.qnet.time['job_queue_control'] += time() - start2
+                start3 = time()
                 self.qnet.save_state_action(state, best_action, self.env.now)
+                self.qnet.time['save_state_action'] += time() - start3
+            self.qnet.time['job_select'] += time() - start1
 
         elif rule == 'SPT':
             if len(self.machine[mc_name].queue) >= 2:
@@ -107,8 +118,6 @@ class Job(object):
             self.oper_num += 1
             self.env.process(self.run_mc(self.next_oper))
         else:
-            self.env.process(self.run_exit())
-
-    def run_exit(self):
-        self.LoS = self.env.now - self.arrt
-        self.tardiness = max(0, self.env.now - self.due_time)
+            self.pbar.update(1)
+            self.LoS = self.env.now - self.arrt
+            self.tardiness = max(0, self.env.now - self.due_time)

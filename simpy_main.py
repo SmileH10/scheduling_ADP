@@ -4,11 +4,13 @@ import numpy as np  # 나중에 random seed 설정할 때, proc_t 확률적으�
 from collections import defaultdict
 from qnet import QNet
 from job import Job
+from tqdm import tqdm
+from time import time
 from datetime import datetime
 import os
 
 
-ITERATION = 3
+ITERATION = 1
 NUM_JOBS = 100
 NUM_PATTERN = 5
 assert NUM_PATTERN <= 24
@@ -106,7 +108,7 @@ def main(gd=False):
 
     seed = 1
     LoS, Tard = [0.0 for n in range(ITERATION)], [0.0 for n in range(ITERATION)]
-
+    start = time()
     for n in range(ITERATION):
         env = simpy.Environment()
         machine = {}
@@ -116,10 +118,11 @@ def main(gd=False):
         jobs = []
         arrt = 0
         np.random.seed(seed=seed)
+        pbar = tqdm(total=NUM_JOBS)
         for id in range(NUM_JOBS):
             interval = np.random.exponential((24 * 60 * 60) / sum(pattern_freq[k] for k in pattern_freq.keys()))
             job_ptrn = np.random.choice(NUM_PATTERN, 1, p=pattern_prob)[0]  # list로 반환해서 [0] 붙여줌
-            jobs.append(Job(env, qnet, 'RL', id, machine, arrt, job_ptrn, mc_sqc[job_ptrn], proc_t[job_ptrn]))
+            jobs.append(Job(env, qnet, 'RL', id, machine, arrt, job_ptrn, mc_sqc[job_ptrn], proc_t[job_ptrn], pbar))
             arrt += interval
         while env.peek() < float("inf"):  # for i in range(1, 300): env.run(until=i)
             env.step()
@@ -137,12 +140,15 @@ def main(gd=False):
                         gd_status['mc_queue'][mc] = 'empty'
                 gd.save_status(n, env.now, gd_status)
         print("Simulation [%d] Complete" % n)
+        pbar.close()
         # 시뮬레이션 1회 결과 기록
         for id in range(NUM_JOBS):
             LoS[n] += jobs[id].LoS
             Tard[n] += jobs[id].tardiness
         LoS[n] = round(LoS[n] / 60.0, 2)  # minute으로 변환
         Tard[n] = round(Tard[n] / 60.0, 2)
+        print('total sim time: ', time() - start)
+        print(qnet.time)
         qnet.update_nstpe_memory(LoS[n], env.now, step=1)
         qnet.train_model()
         if gd:
