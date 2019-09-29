@@ -24,6 +24,7 @@ class Job(object):
     def job_select(self, mc):
         if self.prior_rule == "RL":
             action = self.qnet.run_job_selection(mc, self.simenv.now)
+            print('selected_action: ', action)
             if not action:
                 pass
             else:
@@ -97,8 +98,9 @@ class Job(object):
                 self.g.n_x[self.n_key]['wait'] -= 1
                 self.g.n_x[self.n_key]['srvd'] += 1
             self.waiting_t += self.simenv.now - mc_arrt
+            # print(mc, self.n_key, sum(self.g.n_x[n]['srvd'] for n in self.g.n_x.keys() if n[-1] == mc))
+            # assert 2 >= sum(self.g.n_x[n]['srvd'] for n in self.g.n_x.keys() if n[-1] == mc)
             # print('[%s] pattern %d (id:%d) starting at t = %.2f' % (mc_name, self.pattern, self.id, self.env.now))
-            assert 1 == sum(self.g.n_x[n]['srvd'] for n in self.g.n_x.keys() if n[-1] == mc)
             yield self.simenv.timeout(np.random.exponential(self.g.proct[self.n_key]))
             self.g.n_x[self.n_key]['srvd'] -= 1
             self.update_nkey_and_g()

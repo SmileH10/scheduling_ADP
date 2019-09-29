@@ -8,7 +8,7 @@ class DisjunctivePatternGraph(object):
         self.e_cj = {}
         self.e_dj = {}
         # [status(0:작업중, 1:예약, 2:대기중, 3:종료노드) + proct(4:평균/5:remaining)]
-        self.n_features = ['srvd', 'rsvd', 'wait', 'terminal', 'proct', 'rmnt']
+        self.n_features = ['srvd', 'rsvd', 'wait', 'proct']
         self.make_initial_graph(ptrn_info)
         self.set_st_nodes()
         self.proct = self.make_initial_proct(ptrn_info, mc_info, util=0.85, scale=0.2)
@@ -66,5 +66,4 @@ class DisjunctivePatternGraph(object):
                         break
             for n in n_with_same_mc:
                 self.n_x[n]['proct'] = proct[n]
-                self.n_x[n]['rmnt'] = proct[n]
         return proct

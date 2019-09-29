@@ -1,12 +1,11 @@
 import simpy
 from simulation_GUI import GraphicDisplay
+# from sim_ptrnmapGUI import PtrnMapGraphicDisplay
 import numpy as np  # 나중에 random seed 설정할 때, proc_t 확률적으로 쓸 때
-from collections import defaultdict
 from qnet_ptrnmap import QNet
 from job import Job
 from dp_graph import DisjunctivePatternGraph
 from time import time
-from datetime import datetime
 import os
 
 
@@ -83,34 +82,30 @@ def main(gd=False, prior_rule='SPT'):
             simenv.step()
             if gd:  # GUI sentence. e.g., progressbar.update(i)
                 gd_status = {'mc_users': {}, 'mc_queue': {}}
-                for mc in mc_name_list:
-                    gd_status['mc_users'][mc] = machine[mc].users[0].obj if len(machine[mc].users) > 0 else 'empty'
-                for mc in mc_name_list:
-                    if len(machine[mc].queue) > 0:
+                for mc in mc_info['name']:
+                    gd_status['mc_users'][mc] = sim_mcrsc[mc].users[0].obj if len(sim_mcrsc[mc].users) > 0 else 'empty'
+                for mc in mc_info['name']:
+                    if len(sim_mcrsc[mc].queue) > 0:
                         gd_status['mc_queue'][mc] = {}
-                        for job in range(len(machine[mc].queue)):
-                            gd_status['mc_queue'][mc][job] = machine[mc].queue[job].obj
+                        for job in range(len(sim_mcrsc[mc].queue)):
+                            gd_status['mc_queue'][mc][job] = sim_mcrsc[mc].queue[job].obj
                     else:
                         gd_status['mc_queue'][mc] = 'empty'
-                gd.save_status(n, env.now, gd_status)
+                gd.save_status(n, simenv.now, gd_status)
         print("Simulation [%d] Complete" % n)
         # 시뮬레이션 1회 결과 기록
 
-        # job.py 보고나서 이 밑에서부터 다시 시작
-        for id in range(NUM_JOBS):
-            LoS[n] += jobs[id].LoS
-        LoS[n] = round(LoS[n] / 60.0, 2)  # minute으로 변환
-        print('total sim time: ', time() - start)
-        print(qnet.time)
-        qnet.update_nstpe_memory(LoS[n], simenv.now, step=1)
-        qnet.train_model()
+        # # job.py 보고나서 이 밑에서부터 다시 시작
+        # for id in range(NUM_JOBS):
+        #     Total_WT[n] += jobs[id].LoS
+        # LoS[n] = round(LoS[n] / 60.0, 2)  # minute으로 변환
         if gd:
             gd.event_cnt = 0
         seed += 10
 
-    print("All Simulations Complete")
-    print("LoS_sum(min): ", LoS)
-    print("LoS/patient(min): ", np.array(LoS) / NUM_JOBS)
+    print("All Simulations Complete. 소요시간: %.2f" % (time() - start))
+    print("WT_sum(minutes): ", Total_WT)
+    print("WT/patient(minutes): ", np.array(Total_WT) / NUM_JOBS)
 
     # f = open("%s%s.csv" % (log_dir, 'filename'), "w")  # file_name.csv 파일 만들기
     if gd:
