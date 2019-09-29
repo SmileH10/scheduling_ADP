@@ -39,8 +39,11 @@ def sim_setup(simenv, prior_rule, sim_mcrsc, ptrn_info, mc_info, qnet, g):
         jobs.append(Job(jobid, simenv, prior_rule, sim_mcrsc, ptrn_info, mc_info, g))
         if prior_rule == 'RL':
             jobs[-1].qnet = qnet
-        yield simenv.timeout(arr_interval)
+        if jobid >= 5:
+            yield simenv.timeout(arr_interval)
         jobid += 1
+        if jobid == 1000:
+            break
 
 
 def main(gd=False, prior_rule='SPT'):
@@ -80,6 +83,7 @@ def main(gd=False, prior_rule='SPT'):
 
         while simenv.peek() < float("inf"):  # for i in range(1, 300): env.run(until=i)
             simenv.step()
+
             if gd:  # GUI sentence. e.g., progressbar.update(i)
                 gd_status = {'mc_users': {}, 'mc_queue': {}}
                 for mc in mc_info['name']:

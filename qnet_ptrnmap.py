@@ -11,7 +11,7 @@ import logging, os
 logging.disable(logging.WARNING)
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
-BATCH_SIZE = 4 #  64
+BATCH_SIZE = 64  # 64
 MEMORY_SIZE = 500000
 EPSILON = 0.01
 # W_SCALE = 0.01  # init weights with rand normal(0, w_scale)
@@ -23,7 +23,7 @@ class QNet(object):
         self.mc_info = mc_info
         self.g = g
 
-        self.T = 3
+        self.T = 2
         self.embed_dim = 32
         self.initialize_model()
 
@@ -38,19 +38,19 @@ class QNet(object):
         x = defaultdict(lambda: 0)
         for n in self.g.n_x.keys():
             if n == 'S' or n == 'T':
-                x[n] = Input(shape=(2,))
-                mu[0][n] = Input(shape=(self.embed_dim,))
+                x[n] = Input(shape=(2,), name='x_%s' % n)
+                mu[0][n] = Input(shape=(self.embed_dim,), name='mu_%s' % n)
             else:
-                x[n] = Input(shape=(len(self.g.n_features),))
-                mu[0][n] = Input(shape=(self.embed_dim,))
+                x[n] = Input(shape=(len(self.g.n_features),), name='x_%s' % n)
+                mu[0][n] = Input(shape=(self.embed_dim,), name='mu_%s' % n)
         # random_normal = tf.keras.initializers.RandomNormal(mean=0.0, stddev=0.01)
-        self.layer_septa1_1 = Dense(self.embed_dim)
-        self.layer_septa1_2 = Dense(self.embed_dim)
-        self.layer_septa2 = Dense(self.embed_dim)
-        self.layer_septa3 = Dense(self.embed_dim)
-        self.layer_septa4 = Dense(self.embed_dim)
-        self.layer_septa5 = Dense(self.embed_dim, activation='relu')
-        self.layer_septa6 = Dense(1)
+        self.layer_septa1_1 = Dense(self.embed_dim, name='1-1')
+        self.layer_septa1_2 = Dense(self.embed_dim, name='1-2')
+        self.layer_septa2 = Dense(self.embed_dim, name='2')
+        self.layer_septa3 = Dense(self.embed_dim, name='3')
+        self.layer_septa4 = Dense(self.embed_dim, name='4')
+        self.layer_septa5 = Dense(self.embed_dim, activation='relu', name='5')
+        self.layer_septa6 = Dense(1, name='6')
 
         hop = 0
         while hop < self.T:  # mu[0][n]: 초기값. mu[1][n] ~ mu[T][n] 까지 새로 구함
@@ -99,8 +99,8 @@ class QNet(object):
 
         self.model = Model(inputs=[x[n] for n in self.g.n_x.keys()] + [mu[0][n] for n in self.g.n_x.keys()],
                            outputs=qhat)
-        self.model.compile(optimizer='sgd', loss='mean_squared_error')
-        print(self.model.summary())
+        self.model.compile(optimizer='adam', loss='mean_squared_error')
+        # print(self.model.summary())
         print("ends QNet::initialize_model")
 
     @staticmethod
@@ -109,8 +109,6 @@ class QNet(object):
             return s_nx
         else:
             post_s_nx = deepcopy(s_nx)
-            print('post_s_nx: ', post_s_nx)
-            print('post_s_nx[action]: ', post_s_nx[action])
             if post_s_nx[action]['wait'] > 0:
                 post_s_nx[action]['wait'] -= 1
                 post_s_nx[action]['srvd'] += 1
@@ -127,11 +125,10 @@ class QNet(object):
         #             action_cands_wait.append(n)
         action_cands_wait = [n for n in s_nx.keys() if n[-1] == mc and s_nx[n]['wait'] > 0]
         # action_cands_rsvd = [n for n in s_nx.keys() if len(n) > 2 and s_nx[n[:len(n)-1]]['srvd'] == 1 and s_nx[n]['wait'] == 0 and n[-1] == mc]
-        print('action_cands_wait: ', action_cands_wait)
         if np.random.random() < self.epsilon:
             action_cands = action_cands_wait # + action_cands_rsvd
             if action_cands:
-                best_a = np.random.choice(action_cands)[0]
+                best_a = np.random.choice(action_cands)
             else:
                 best_a = None
         else:
@@ -140,14 +137,14 @@ class QNet(object):
             for a in action_cands_wait:
                 post_s_nx = self.get_post_state(s_nx, a)
                 x = self.make_input_shape(post_s_nx)
-                qhat = self.model.predict(x)  # np.expand_dims(x, axis=0)
+                qhat = self.model.predict(x)[0][0]  # np.expand_dims(x, axis=0)
                 if qhat < best_q:
                     best_q = qhat
                     best_a = a
             # for a in action_cands_rsvd:
             #     post_s_nx = self.get_post_state(s_nx, a)
             #     x = self.make_input_shape(post_s_nx)
-            #     qhat = self.model.predict(x)
+            #     qhat = self.model.predict(x)[0][0]
             #     if qhat < best_q:
             #         best_q = qhat
             #         best_a = a
@@ -155,7 +152,6 @@ class QNet(object):
         best_post_s = self.get_post_state(s_nx, best_a)
         if best_a:
             self.save_state_action(best_post_s, simenv_now)
-            self.g.n_x = deepcopy(best_post_s)
         return best_a
 
     def make_input_shape(self, n_x):  # qnet으로 옮기기
@@ -198,26 +194,24 @@ class QNet(object):
                 del self.memory[0]
             self.memory.append((post_s_t_minus_n, reward, post_s_t, gamma))
             del self.short_memory[0]
+            if len(self.memory) % BATCH_SIZE == 0:
+                print('memory_storage: ', len(self.memory))
 
     def train_model(self):
         memory_sample = random.sample(self.memory, BATCH_SIZE)
-        print('memory_sample: ', memory_sample)
         y = []
-        q = []
+        x_train = [[] for _ in range(88)]
         for m in memory_sample:
             s_t_minus_n = m[0]
+            x = self.make_input_shape(s_t_minus_n)
+            for i in range(len(x)):
+                x_train[i] += x[i]
             r = m[1]
             s_t = m[2]
             gamma = m[3]
-            y.append(r + gamma * self.model.predict(self.make_input_shape(s_t)))
-            # q.append(self.model.predict(self.make_input_shape(s_t_minus_n)))
+            y.append([r + gamma * self.model.predict(self.make_input_shape(s_t))[0][0]])
+        # print('input: ', np.shape(x_train), x_train)
+        # print('output: ', np.shape([y]), [y])
 
-            # next_action_list = self.get_action_list(state=s_t_plus_n)
-            # action_list는 미리 저장할 수 있는데, qhat(s_t_plus_n, a)는 미리 저장하면 안되고,
-                                   # 그때그때 업데이트된 세타를 반영해야
-            # y.append(r + self.gamma * max(self.get_qvalue(s_t_plus_n, action_node) for action_node in next_action_list))
-            # q.append(self.get_qvalue(s_t, v_t))
-        print([self.make_input_shape(m[0]) for m in memory_sample])
-        print(np.shape([self.make_input_shape(m[0]) for m in memory_sample]))  # 4 * 88 * 1 이 나오는데, 88 * 4 * 1 이 나오게끔 해야 해.
-        self.model.fit([self.make_input_shape(m[0]) for m in memory_sample], y)
+        self.model.fit(x_train, [y])
         # self.model.fit(y, q, batch_size=BATCH_SIZE, epochs=100)  # 진짜 데이터 입력
