@@ -11,7 +11,8 @@ class DisjunctivePatternGraph(object):
         self.n_features = ['srvd', 'rsvd', 'wait', 'proct']
         self.make_initial_graph(ptrn_info)
         self.set_st_nodes()
-        self.proct = self.make_initial_proct(ptrn_info, mc_info, util=0.85, scale=0.2)
+        util = {mc: 0.7 for mc in mc_info['name']}
+        self.proct = self.make_initial_proct(ptrn_info, mc_info, util)
 
     def set_st_nodes(self):
         self.n_x['S'] = [1, 0]
@@ -47,22 +48,22 @@ class DisjunctivePatternGraph(object):
         for n in self.n_x.keys():
             self.e_dj[n] = [n2 for n2 in self.n_x.keys() if n2[-1] == n[-1]]
 
-    def make_initial_proct(self, ptrn_info, mc_info, util=0.85, scale=0.2):    # 평균 근처에서 다들 비슷하게 하는 건 별로..
+    def make_initial_proct(self, ptrn_info, mc_info, util, scale=0.05):    # 평균 근처에서 다들 비슷하게 하는 건 별로..
         # self.proct[n] 만들기
         proct = {}
         for mc in mc_info['name']:
             n_with_same_mc = [n for n in self.n_x.keys() if n[-1] == mc]
             mc_freq = sum(ptrn_info['freq'][ptrn] * ptrn.count(mc) for ptrn in ptrn_info['name'])
-            mc_proct_mean = min(10800.0, util * (24 * 60 * 60) / mc_freq)
+            mc_proct_mean = min(10800.0, util[mc] * (24 * 60 * 60) / mc_freq)
             while True:
                 for n in n_with_same_mc:
                     proct[n] = round(np.random.uniform(mc_proct_mean - scale * mc_proct_mean, mc_proct_mean + scale * mc_proct_mean))
                 if sum(proct[n] * sum(ptrn_info['freq'][ptrn] for ptrn in ptrn_info['name'] if n in ptrn) for n in n_with_same_mc)\
-                        / (24 * 60 * 60) < min(0.95, util + 0.1):
+                        / (24 * 60 * 60) < min(0.95, util[mc] + 0.1):
                     if mc_proct_mean == 10800:
                         break
                     elif sum(proct[n] * sum(ptrn_info['freq'][ptrn] for ptrn in ptrn_info['name'] if n in ptrn) for n in n_with_same_mc)\
-                            / (24 * 60 * 60) > util - 0.1:
+                            / (24 * 60 * 60) > util[mc] - 0.1:
                         break
             for n in n_with_same_mc:
                 self.n_x[n]['proct'] = proct[n]

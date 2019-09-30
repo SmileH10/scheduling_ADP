@@ -1,12 +1,22 @@
 import tensorflow as tf
-from tensorflow.keras.layers import Input, Dense, Add, concatenate, Multiply, Dot
-from tensorflow.keras.models import Model
-from time import time
+# import tensorflow.python.keras
+from tensorflow.python.keras.layers import Input, Dense, Add  #, concatenate, Multiply, Dot
+from tensorflow.python.keras.models import Model, model_from_json
+from tensorflow.python.keras import activations
+#
+# import keras
+# from keras.layers import Input, Dense, Add  #, concatenate, Multiply, Dot
+# from keras.models import Model, model_from_json
+# from keras import activations
+
+import matplotlib.pyplot as plt
 from collections import defaultdict
 from copy import deepcopy
 import random
 import numpy as np
 import logging, os
+import sys
+print(sys.version)
 
 logging.disable(logging.WARNING)
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
@@ -18,10 +28,15 @@ EPSILON = 0.01
 
 
 class QNet(object):
-    def __init__(self,  ptrn_info, mc_info, g):
+    def __init__(self,  ptrn_info, mc_info, g, log_dir):
         self.ptrn_info = ptrn_info
         self.mc_info = mc_info
         self.g = g
+        self.log_dir = log_dir
+        self.fig_dir = log_dir + "output_fig/model/"
+        self.model_dir = log_dir[2:] + "model/"
+        os.makedirs(self.fig_dir)
+        os.makedirs(self.model_dir)
 
         self.T = 2
         self.embed_dim = 32
@@ -31,6 +46,9 @@ class QNet(object):
         self.short_memory = []
         self.memory = []
         self.gamma_unit = 0.9999 ** 60  # 시간단위를 60초에 0.9999로 하려고. (=0.994)
+
+        self.cur_epoch = 0
+        self.loss_history = []
 
     def initialize_model(self):
         print("running QNet::initialize_model..")
@@ -60,7 +78,7 @@ class QNet(object):
                     output1 = self.layer_septa1_2(x[n1])
                     # conjunctive_next-nodes
                     if sum(1 for key in self.g.e_cj.keys() if key[0] == n1) == 1:
-                        input3 = [mu[hop - 1][key[1]] for key in self.g.e_cj.keys() if key[0] == n1][0]
+                        input3 = tf.convert_to_tensor([mu[hop - 1][key[1]] for key in self.g.e_cj.keys() if key[0] == n1][0])
                     else:
                         input3 = Add()([self.g.e_cj[key] * mu[hop - 1][key[1]] for key in self.g.e_cj.keys() if key[0] == n1])
                     output3 = self.layer_septa3(input3)
@@ -75,31 +93,35 @@ class QNet(object):
                     output1 = self.layer_septa1_1(x[n1])
                     # disjunctive nodes
                     if len(self.g.e_dj[n1]) == 1:
-                        input2 = [mu[hop - 1][n2] for n2 in self.g.e_dj[n1]][0]  # n2: 자기 자신
+                        input2 = tf.convert_to_tensor([mu[hop - 1][n2] for n2 in self.g.e_dj[n1]][0])  # n2: 자기 자신
                     else:
                         input2 = Add()([mu[hop - 1][n2] for n2 in self.g.e_dj[n1]])
                     output2 = self.layer_septa2(input2)
                     # conjunctive_next-nodes
                     if sum(1 for key in self.g.e_cj.keys() if key[0] == n1) == 1:
-                        input3 = [mu[hop - 1][key[1]] for key in self.g.e_cj.keys() if key[0] == n1][0]
+                        input3 = tf.convert_to_tensor([mu[hop - 1][key[1]] for key in self.g.e_cj.keys() if key[0] == n1][0])
                     else:
                         input3 = Add()([self.g.e_cj[key] * mu[hop - 1][key[1]] for key in self.g.e_cj.keys() if key[0] == n1])
                     output3 = self.layer_septa3(input3)
                     # conjunctive_previous-nodes
                     if sum(1 for key in self.g.e_cj.keys() if key[1] == n1) == 1:
-                        input4 = [mu[hop - 1][key[0]] for key in self.g.e_cj.keys() if key[1] == n1][0]
+                        input4 = tf.convert_to_tensor([mu[hop - 1][key[0]] for key in self.g.e_cj.keys() if key[1] == n1][0])
                     else:
                         input4 = Add()([self.g.e_cj[key] * mu[hop - 1][key[0]] for key in self.g.e_cj.keys() if key[1] == n1])
                     output4 = self.layer_septa4(input4)
                     input_mu = Add()([output1, output2, output3, output4])
-                mu[hop][n1] = tf.keras.activations.relu(input_mu)  # from keras.layers import Activation '\n' model.add(Activation('relu'))
+                mu[hop][n1] = activations.relu(input_mu)  # from keras.layers import Activation '\n' model.add(Activation('relu'))
         input5 = Add()([mu[self.T][n] for n in self.g.n_x.keys()])
         output5 = self.layer_septa5(input5)
         qhat = self.layer_septa6(output5)
-
         self.model = Model(inputs=[x[n] for n in self.g.n_x.keys()] + [mu[0][n] for n in self.g.n_x.keys()],
                            outputs=qhat)
         self.model.compile(optimizer='adam', loss='mean_squared_error')
+        checkpoint_path = self.model_dir  # "training_1/cp.ckpt"
+        self.cp_callback = tf.keras.callbacks.ModelCheckpoint(checkpoint_path + "cp.ckpt",
+                                                              save_weights_only=True,
+                                                              verbose=1,
+                                                              period=50)
         # print(self.model.summary())
         print("ends QNet::initialize_model")
 
@@ -210,8 +232,25 @@ class QNet(object):
             s_t = m[2]
             gamma = m[3]
             y.append([r + gamma * self.model.predict(self.make_input_shape(s_t))[0][0]])
-        # print('input: ', np.shape(x_train), x_train)
-        # print('output: ', np.shape([y]), [y])
 
-        self.model.fit(x_train, [y])
-        # self.model.fit(y, q, batch_size=BATCH_SIZE, epochs=100)  # 진짜 데이터 입력
+        self.cur_epoch += 1
+        history = self.model.fit(x_train, [y], batch_size=BATCH_SIZE, verbose=1, callbacks=[self.cp_callback])
+        # self.model.save(self.model_dir + 'model_epoch%d.h5' % self.cur_epoch)
+
+        self.loss_history.append(history.history['loss'][0])
+        if self.cur_epoch % 10 == 0:
+            plt.plot(self.loss_history)
+            plt.title('Model loss')
+            plt.ylabel('Loss')
+            plt.xlabel('Epoch')
+            plt.legend(['Train'], loc='upper left')
+            plt.savefig(self.fig_dir + 'Epoch-{}.png'.format(self.cur_epoch))
+            plt.close()
+            if self.cur_epoch >= 200:
+                plt.plot(self.loss_history[30:])
+                plt.title('Model loss')
+                plt.ylabel('Loss')
+                plt.xlabel('Epoch')
+                plt.legend(['Train'], loc='upper left')
+                plt.savefig(self.fig_dir + 'warmup_Epoch-{}.png'.format(self.cur_epoch))
+                plt.close()

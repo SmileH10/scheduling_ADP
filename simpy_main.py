@@ -1,11 +1,12 @@
 import simpy
-from simulation_GUI import GraphicDisplay
+# from simulation_GUI import GraphicDisplay
 # from sim_ptrnmapGUI import PtrnMapGraphicDisplay
 import numpy as np  # 나중에 random seed 설정할 때, proc_t 확률적으로 쓸 때
 from qnet_ptrnmap import QNet
 from job import Job
 from dp_graph import DisjunctivePatternGraph
 from time import time
+from datetime import datetime
 import os
 
 
@@ -31,25 +32,29 @@ def load_job_features():
     return ptrn_info
 
 
-def sim_setup(simenv, prior_rule, sim_mcrsc, ptrn_info, mc_info, qnet, g):
-    arr_interval = np.random.exponential((24 * 60 * 60) / sum(ptrn_info['freq'][ptrn] for ptrn in ptrn_info['name']))
+def sim_setup(simenv, prior_rule, sim_mcrsc, ptrn_info, mc_info, qnet, g, fig_dir, report):
     jobs = []
     jobid = 0
+    report['num_job_in_system'] = 0
     while True:
-        jobs.append(Job(jobid, simenv, prior_rule, sim_mcrsc, ptrn_info, mc_info, g))
+        jobs.append(Job(jobid, simenv, prior_rule, sim_mcrsc, ptrn_info, mc_info, g, fig_dir, report))
         if prior_rule == 'RL':
             jobs[-1].qnet = qnet
-        if jobid >= 5:
-            yield simenv.timeout(arr_interval)
+        # interval time of arrival
+        yield simenv.timeout(np.random.exponential((24 * 60 * 60) / sum(ptrn_info['freq'][ptrn] for ptrn in ptrn_info['name'])))
         jobid += 1
-        if jobid == 1000:
+        if jobid == 10000:
+            print("@@@@@****************************** %.2f ******************************@@@@@" % simenv.now)
             break
 
 
 def main(gd=False, prior_rule='SPT'):
-    # # 결과파일 출력 주소 지정
-    # log_dir = "./logs/{}-{}/".format('rule_name', datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
-    # os.makedirs(log_dir)
+    # 결과파일 출력 주소 지정
+    print("RULE: ", prior_rule)
+    log_dir = "./logs/{}-{}/".format(prior_rule, datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
+    os.makedirs(log_dir)
+    fig_dir = log_dir + "output_fig/waiting_time/"
+    os.makedirs(fig_dir)
 
     # load data: ptrn/mc info
     mc_info = {'name': ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'I', 'J']}
@@ -57,59 +62,59 @@ def main(gd=False, prior_rule='SPT'):
 
     # load classes
     g = DisjunctivePatternGraph(ptrn_info, mc_info)
-    if gd:
-        gd = GraphicDisplay(mc_info['name'])
+    # if gd:
+    #     gd = GraphicDisplay(mc_info['name'])
     if prior_rule == 'RL':
-        qnet = QNet(ptrn_info, mc_info, g)  # qnet part 나중에 확인##########################
+        qnet = QNet(ptrn_info, mc_info, g, log_dir)  # qnet part 나중에 확인##########################
     else:
         qnet = False
 
     # 결과 기록 변수 생성
-    Total_WT = [0.0 for n in range(ITERATION)]
+    report = {'WT': []}
 
     # 알고리즘 초기값 설정
     seed = 1
     start = time()
 
-    for n in range(ITERATION):  # 나중에 iteration 없애고 시간길이로 바꾸기. 결과; sim시간 1일-2일-...10000일..
-        # Iteration 초기값 설정
-        simenv = simpy.Environment()
-        sim_mcrsc = {mc: simpy.Resource(simenv, capacity=1) for mc in mc_info['name']}
-        if prior_rule == 'RL':
-            qnet.sim_mcrsc = sim_mcrsc  # qnet part 나중에 확인##########################
 
-        np.random.seed(seed=seed)
-        simenv.process(sim_setup(simenv, prior_rule, sim_mcrsc, ptrn_info, mc_info, qnet, g))
+    # Iteration 초기값 설정
+    simenv = simpy.Environment()
+    sim_mcrsc = {mc: simpy.Resource(simenv, capacity=1) for mc in mc_info['name']}
+    if prior_rule == 'RL':
+        qnet.sim_mcrsc = sim_mcrsc  # qnet part 나중에 확인##########################
 
-        while simenv.peek() < float("inf"):  # for i in range(1, 300): env.run(until=i)
-            simenv.step()
+    np.random.seed(seed=seed)
+    simenv.process(sim_setup(simenv, prior_rule, sim_mcrsc, ptrn_info, mc_info, qnet, g, fig_dir, report))
 
-            if gd:  # GUI sentence. e.g., progressbar.update(i)
-                gd_status = {'mc_users': {}, 'mc_queue': {}}
-                for mc in mc_info['name']:
-                    gd_status['mc_users'][mc] = sim_mcrsc[mc].users[0].obj if len(sim_mcrsc[mc].users) > 0 else 'empty'
-                for mc in mc_info['name']:
-                    if len(sim_mcrsc[mc].queue) > 0:
-                        gd_status['mc_queue'][mc] = {}
-                        for job in range(len(sim_mcrsc[mc].queue)):
-                            gd_status['mc_queue'][mc][job] = sim_mcrsc[mc].queue[job].obj
-                    else:
-                        gd_status['mc_queue'][mc] = 'empty'
-                gd.save_status(n, simenv.now, gd_status)
-        print("Simulation [%d] Complete" % n)
-        # 시뮬레이션 1회 결과 기록
+    while simenv.peek() < float("inf"):  # for i in range(1, 300): env.run(until=i)
+        simenv.step()
 
-        # # job.py 보고나서 이 밑에서부터 다시 시작
-        # for id in range(NUM_JOBS):
-        #     Total_WT[n] += jobs[id].LoS
-        # LoS[n] = round(LoS[n] / 60.0, 2)  # minute으로 변환
-        if gd:
-            gd.event_cnt = 0
-        seed += 10
+        if gd:  # GUI sentence. e.g., progressbar.update(i)
+            gd_status = {'mc_users': {}, 'mc_queue': {}}
+            for mc in mc_info['name']:
+                gd_status['mc_users'][mc] = sim_mcrsc[mc].users[0].obj if len(sim_mcrsc[mc].users) > 0 else 'empty'
+            for mc in mc_info['name']:
+                if len(sim_mcrsc[mc].queue) > 0:
+                    gd_status['mc_queue'][mc] = {}
+                    for job in range(len(sim_mcrsc[mc].queue)):
+                        gd_status['mc_queue'][mc][job] = sim_mcrsc[mc].queue[job].obj
+                else:
+                    gd_status['mc_queue'][mc] = 'empty'
+            gd.save_status(n, simenv.now, gd_status)
+    print("Simulation Complete")
+    # 시뮬레이션 1회 결과 기록
 
-    print("All Simulations Complete. 소요시간: %.2f" % (time() - start))
-    print("WT_sum(minutes): ", Total_WT)
-    print("WT/patient(minutes): ", np.array(Total_WT) / NUM_JOBS)
+    # # job.py 보고나서 이 밑에서부터 다시 시작
+    # for id in range(NUM_JOBS):
+    #     Total_WT[n] += jobs[id].LoS
+    # LoS[n] = round(LoS[n] / 60.0, 2)  # minute으로 변환
+    if gd:
+        gd.event_cnt = 0
+    seed += 10
+
+    # print("All Simulations Complete. 소요시간: %.2f" % (time() - start))
+    # print("WT_sum(minutes): ", Total_WT)
+    # print("WT/patient(minutes): ", np.array(Total_WT) / NUM_JOBS)
 
     # f = open("%s%s.csv" % (log_dir, 'filename'), "w")  # file_name.csv 파일 만들기
     if gd:
