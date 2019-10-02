@@ -101,15 +101,22 @@ class Job(object):
             # 결과 기록
             # print("job %d ends at %.1f with WT %.1f" % (self.id, self.simenv.now, self.waiting_t))
             self.report['num_job_in_system'] -= 1
-            # for mc in self.mc_info['name']:
-            #     if len(self.sim_mcrsc[mc].queue) >= 2:
-            #         print("%s queue length: %d" % (mc, len(self.sim_mcrsc[mc].queue)))
+            # 전체 평균 기록
             if self.report['WT']:
                 avg = self.report['WT'][-1] * len(self.report['WT']) / (len(self.report['WT']) + 1) \
                       + self.waiting_t / (len(self.report['WT']) + 1)
                 self.report['WT'].append(avg)
             else:
                 self.report['WT'].append(self.waiting_t)
+            # warmup 이후 평균 기록
+            if self.simenv.now > 14 * (24 * 60 * 60):
+                if self.report['WT_warmup']:
+                    avg = self.report['WT_warmup'][-1] * len(self.report['WT_warmup']) / (len(self.report['WT_warmup']) + 1) \
+                          + self.waiting_t / (len(self.report['WT_warmup']) + 1)
+                    self.report['WT_warmup'].append(avg)
+                else:
+                    self.report['WT_warmup'].append(self.waiting_t)
+            # 전체 WT 그래프 기록
             if len(self.report['WT']) % 100 == 0:
                 print("cur_t: %.1f(%dd-%dh-%dm-%ds)"
                       % (self.simenv.now, self.simenv.now/(24*60*60), self.simenv.now%(24*60*60)/(60.0*60), self.simenv.now%(60*60)/60.0,
@@ -123,15 +130,14 @@ class Job(object):
                 # plt.legend(['Train'], loc='upper left')
                 plt.savefig(self.fig_dir + 'Job-{}.png'.format(len(self.report['WT'])))
                 plt.close()
-                if len(self.report['WT']) >= 40:
-                    plt.plot(self.report['WT'][30:])
+                # warmup 이후 WT 그래프 기록
+                if self.simenv.now > 14 * (24 * 60 * 60):
+                    plt.plot(self.report['WT_warmup'])
                     plt.title('Model Results')
                     plt.ylabel('Avg. waiting time')
                     plt.xlabel('# job completed')
                     plt.savefig(self.fig_dir + 'warmup_Job-{}.png'.format(len(self.report['WT'])))
                     plt.close()
-                    if len(self.qnet.loss_history) >= 100:
-                        print('avg_100/%d_loss: %.1f' % (len(self.qnet.loss_history), sum(self.qnet.loss_history[-100:][i] for i in range(100))/100))
 
     def run_mc(self, mc):
         mc_arrt = self.simenv.now

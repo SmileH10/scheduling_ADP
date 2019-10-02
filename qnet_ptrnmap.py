@@ -1,9 +1,8 @@
 import tensorflow as tf
-# import tensorflow.python.keras
-from tensorflow.python.keras.layers import Input, Dense, Add  #, concatenate, Multiply, Dot
-from tensorflow.python.keras.models import Model, model_from_json
+from tensorflow.python.keras.layers import Input, Dense, Add, Activation, Concatenate #, concatenate, Multiply, Dot
+from tensorflow.python.keras.models import Model
 from tensorflow.python.keras import activations
-#
+
 # import keras
 # from keras.layers import Input, Dense, Add  #, concatenate, Multiply, Dot
 # from keras.models import Model, model_from_json
@@ -17,6 +16,7 @@ import numpy as np
 import logging, os
 import sys
 print(sys.version)
+print(tf.__version__)
 
 logging.disable(logging.WARNING)
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
@@ -28,7 +28,7 @@ EPSILON = 0.01
 
 
 class QNet(object):
-    def __init__(self,  ptrn_info, mc_info, g, log_dir):
+    def __init__(self,  ptrn_info, mc_info, g, log_dir, load_ckpt=False, test=False):
         self.ptrn_info = ptrn_info
         self.mc_info = mc_info
         self.g = g
@@ -37,18 +37,21 @@ class QNet(object):
         self.model_dir = log_dir[2:] + "model/"
         os.makedirs(self.fig_dir)
         os.makedirs(self.model_dir)
+        self.ckpt = load_ckpt
+        self.test = test
 
-        self.T = 2
+        self.T = 3
         self.embed_dim = 32
         self.initialize_model()
 
         self.epsilon = 0.05  # random action prob.
         self.short_memory = []
         self.memory = []
-        self.gamma_unit = 0.9999 ** 60  # 시간단위를 60초에 0.9999로 하려고. (=0.994)
+        self.gamma_unit = 0.95  # 0.9999 ** 60  # 시간단위를 60초에 0.9999로 하려고. (=0.994)
 
         self.cur_epoch = 0
         self.loss_history = []
+        self.loss_history_warmup = []
 
     def initialize_model(self):
         print("running QNet::initialize_model..")
@@ -110,10 +113,47 @@ class QNet(object):
                         input4 = Add()([self.g.e_cj[key] * mu[hop - 1][key[0]] for key in self.g.e_cj.keys() if key[1] == n1])
                     output4 = self.layer_septa4(input4)
                     input_mu = Add()([output1, output2, output3, output4])
-                mu[hop][n1] = activations.relu(input_mu)  # from keras.layers import Activation '\n' model.add(Activation('relu'))
+                mu[hop][n1] = Activation('relu', name='act')(input_mu)
+
+            # # get layer
+            # tmp_model = Model(inputs=mu, outputs=qhat)
+            # self.model.get_layer('act').output
+            #
+            #
+            # # type 1
+            # state = sum(mu[T][v] for v in Node_set)
+            # action = mu[T][0]  / mu[T][1] / mu[T][2]
+            # new_input = Concatenate()([state, action])
+            # qhat = Dense(1)(new_input)
+            #
+            # # type2
+            # state_value = [mu[T][i].output for i in range(10)]
+            # new_state=[mu0, mu1, mu2, mu3]
+            # action = [0, 1, 0, 0]
+            #
+            # input = Dot()([new_state, action]) mu1
+            #
+            # actioon = Input(shape=3)
+            #
+            # new_input = Concatenate()([state, actioon])
+            # qhat = Dense(1)(new_input)
+        #
+        #
+        #     self.model = Model(inputs=([x[n] for n in self.g.n_x.keys()] + [mu[0][n] for n in self.g.n_x.keys()],actioon),
+        #                        outputs=qhat)
+        #     self.model.fit((original_input, state_value), original_output)
+        #     self.model.predict()
+        #
+        #
+        # new = Concatenate()((mu[0], mu[1], mu[3]))
+        # new_next = Dense(3)(new)
+        #
+        #
+
         input5 = Add()([mu[self.T][n] for n in self.g.n_x.keys()])
         output5 = self.layer_septa5(input5)
         qhat = self.layer_septa6(output5)
+
         self.model = Model(inputs=[x[n] for n in self.g.n_x.keys()] + [mu[0][n] for n in self.g.n_x.keys()],
                            outputs=qhat)
         self.model.compile(optimizer='adam', loss='mean_squared_error')
@@ -123,6 +163,8 @@ class QNet(object):
                                                               verbose=1,
                                                               period=50)
         # print(self.model.summary())
+        if self.ckpt:
+            self.model.load_weights(self.ckpt)
         print("ends QNet::initialize_model")
 
     @staticmethod
@@ -195,16 +237,19 @@ class QNet(object):
         return x
 
     def save_state_action(self, post_n_x, t):
-        num_waitjob = sum(post_n_x[n]['wait'] for n in post_n_x.keys() if n != 'S' and n != 'T')
-        if len(self.short_memory) == 0:
-            self.short_memory.append((post_n_x, 0, t))  # (s^a, r, t)
+        if self.test:
+            return
         else:
-            gamma = self.gamma_unit ** (t - self.short_memory[-1][2])
-            reward = num_waitjob * (1 + gamma)/2  # 직전 시점부터 현재 t 시점까지의 reward
-            self.short_memory.append((post_n_x, reward, t))  # (현재 t 시점의 상태, t-1~t 누적 보상, 현재 시점 t)
-        self.save_nstpe_memory(step=1)
-        if len(self.memory) > BATCH_SIZE:
-            self.train_model()
+            num_waitjob = sum(post_n_x[n]['wait'] for n in post_n_x.keys() if n != 'S' and n != 'T')
+            if len(self.short_memory) == 0:
+                self.short_memory.append((post_n_x, 0, t))  # (s^a, r, t)
+            else:
+                gamma = self.gamma_unit ** (t - self.short_memory[-1][2])
+                reward = num_waitjob * (1 + gamma)/2  # 직전 시점부터 현재 t 시점까지의 reward
+                self.short_memory.append((post_n_x, reward, t))  # (현재 t 시점의 상태, t-1~t 누적 보상, 현재 시점 t)
+            self.save_nstpe_memory(step=1)
+            if len(self.memory) > BATCH_SIZE:
+                self.train_model()
 
     def save_nstpe_memory(self, step=1):
         if len(self.short_memory) > step:
@@ -234,10 +279,14 @@ class QNet(object):
             y.append([r + gamma * self.model.predict(self.make_input_shape(s_t))[0][0]])
 
         self.cur_epoch += 1
-        history = self.model.fit(x_train, [y], batch_size=BATCH_SIZE, verbose=1, callbacks=[self.cp_callback])
+        # history = self.model.train_on_batch(x_train, [y])  # learning rate 지정해야.
+        history = self.model.fit(x_train, [y], batch_size=BATCH_SIZE, verbose=0, callbacks=[self.cp_callback])
         # self.model.save(self.model_dir + 'model_epoch%d.h5' % self.cur_epoch)
 
         self.loss_history.append(history.history['loss'][0])
+        if len(self.loss_history) >= 100:
+            if sum(self.loss_history[-100:][i] for i in range(100)) / 100 <= 200:
+                self.loss_history_warmup.append(history.history['loss'][0])
         if self.cur_epoch % 10 == 0:
             plt.plot(self.loss_history)
             plt.title('Model loss')
@@ -246,11 +295,14 @@ class QNet(object):
             plt.legend(['Train'], loc='upper left')
             plt.savefig(self.fig_dir + 'Epoch-{}.png'.format(self.cur_epoch))
             plt.close()
-            if self.cur_epoch >= 200:
-                plt.plot(self.loss_history[30:])
+            if len(self.loss_history_warmup) > 0:
+                plt.plot(self.loss_history_warmup)
                 plt.title('Model loss')
                 plt.ylabel('Loss')
                 plt.xlabel('Epoch')
                 plt.legend(['Train'], loc='upper left')
                 plt.savefig(self.fig_dir + 'warmup_Epoch-{}.png'.format(self.cur_epoch))
                 plt.close()
+
+        if len(self.loss_history) % 100 == 0:
+            print('avg_100/%d_loss: %.1f' % (len(self.loss_history), sum(self.loss_history[-100:][i] for i in range(100)) / 100))

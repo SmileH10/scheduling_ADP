@@ -48,7 +48,7 @@ def sim_setup(simenv, prior_rule, sim_mcrsc, ptrn_info, mc_info, qnet, g, fig_di
             break
 
 
-def main(gd=False, prior_rule='SPT'):
+def main(gd=False, prior_rule='SPT', load_ckpt=False, test=False):
     # 결과파일 출력 주소 지정
     print("RULE: ", prior_rule)
     log_dir = "./logs/{}-{}/".format(prior_rule, datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
@@ -65,17 +65,16 @@ def main(gd=False, prior_rule='SPT'):
     # if gd:
     #     gd = GraphicDisplay(mc_info['name'])
     if prior_rule == 'RL':
-        qnet = QNet(ptrn_info, mc_info, g, log_dir)  # qnet part 나중에 확인##########################
+        qnet = QNet(ptrn_info, mc_info, g, log_dir, ckpt=load_ckpt, test=test)  # qnet part 나중에 확인##########################
     else:
         qnet = False
 
     # 결과 기록 변수 생성
-    report = {'WT': []}
+    report = {'WT': [], 'WT_warmup': []}
 
     # 알고리즘 초기값 설정
     seed = 1
     start = time()
-
 
     # Iteration 초기값 설정
     simenv = simpy.Environment()
@@ -123,4 +122,5 @@ def main(gd=False, prior_rule='SPT'):
 
 
 if __name__ == '__main__':
-    main(gd=False, prior_rule='RL')
+    ckpt = r'C:\Users\weird\OneDrive - 연세대학교 (Yonsei University)\PycharmProjects_Dropbox\19ADP_EDscheduling\logs\RL-2019-09-30_17-46-18\model\cp.ckpt'
+    main(gd=False, prior_rule='RL', load_ckpt=ckpt, test=False)
