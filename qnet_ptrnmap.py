@@ -1,7 +1,12 @@
+"""
+version 1.
+Post-state (action 직후 변화하는 node 속성을 input으로 q-hat(output)을 구함.
+19.10.01 세미나 발표 버전.
+"""
+
 import tensorflow as tf
-from tensorflow.python.keras.layers import Input, Dense, Add, Activation, Concatenate #, concatenate, Multiply, Dot
+from tensorflow.python.keras.layers import Input, Dense, Add, Activation, Lambda, Concatenate #, Multiply, Dot
 from tensorflow.python.keras.models import Model
-from tensorflow.python.keras import activations
 
 # import keras
 # from keras.layers import Input, Dense, Add  #, concatenate, Multiply, Dot
@@ -9,7 +14,6 @@ from tensorflow.python.keras import activations
 # from keras import activations
 
 import matplotlib.pyplot as plt
-from collections import defaultdict
 from copy import deepcopy
 import random
 import numpy as np
@@ -21,9 +25,8 @@ print(tf.__version__)
 logging.disable(logging.WARNING)
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
-BATCH_SIZE = 64  # 64
+BATCH_SIZE = 32  # 64
 MEMORY_SIZE = 500000
-EPSILON = 0.01
 # W_SCALE = 0.01  # init weights with rand normal(0, w_scale)
 
 
@@ -40,7 +43,7 @@ class QNet(object):
         self.ckpt = load_ckpt
         self.test = test
 
-        self.T = 3
+        self.T = 2
         self.embed_dim = 32
         self.initialize_model()
 
@@ -51,19 +54,16 @@ class QNet(object):
 
         self.cur_epoch = 0
         self.loss_history = []
-        self.loss_history_warmup = []
+        self.loss_history_zoomin = []
 
     def initialize_model(self):
         print("running QNet::initialize_model..")
-        mu = defaultdict(dict)
-        x = defaultdict(lambda: 0)
-        for n in self.g.n_x.keys():
-            if n == 'S' or n == 'T':
-                x[n] = Input(shape=(2,), name='x_%s' % n)
-                mu[0][n] = Input(shape=(self.embed_dim,), name='mu_%s' % n)
-            else:
-                x[n] = Input(shape=(len(self.g.n_features),), name='x_%s' % n)
-                mu[0][n] = Input(shape=(self.embed_dim,), name='mu_%s' % n)
+        mu = {(0, nkey): Input(shape=(self.embed_dim,), name='mu_%d%s' % (0, nkey))
+              for nkey in self.g.n_x.keys()}
+        x = {nkey: Input(shape=(len(self.g.n_features),), name='x_%s' % nkey) for nkey in self.g.n_x.keys() if nkey != 'S' and nkey != 'T'}
+        x['S'] = Input(shape=(2,), name='x_%s' % 'S')
+        x['T'] = Input(shape=(2,), name='x_%s' % 'T')
+
         # random_normal = tf.keras.initializers.RandomNormal(mean=0.0, stddev=0.01)
         self.layer_septa1_1 = Dense(self.embed_dim, name='1-1')
         self.layer_septa1_2 = Dense(self.embed_dim, name='1-2')
@@ -74,46 +74,55 @@ class QNet(object):
         self.layer_septa6 = Dense(1, name='6')
 
         hop = 0
+        new_mu = {}
         while hop < self.T:  # mu[0][n]: 초기값. mu[1][n] ~ mu[T][n] 까지 새로 구함
             hop += 1
             for n1 in self.g.n_x.keys():
                 if n1 == 'S':
                     output1 = self.layer_septa1_2(x[n1])
                     # conjunctive_next-nodes
-                    if sum(1 for key in self.g.e_cj.keys() if key[0] == n1) == 1:
-                        input3 = tf.convert_to_tensor([mu[hop - 1][key[1]] for key in self.g.e_cj.keys() if key[0] == n1][0])
-                    else:
-                        input3 = Add()([self.g.e_cj[key] * mu[hop - 1][key[1]] for key in self.g.e_cj.keys() if key[0] == n1])
+                    if sum(1 for key in self.g.e_cj.keys() if key[0] == n1) == 1:  # 100% 여기
+                        input3 = [mu[(hop - 1, key[1])] for key in self.g.e_cj.keys() if key[0] == n1][0]  # tf.convert_to_tensor
+                    # else:  # else 방문 안 함. 지금 case에서 next_key는 1개니까.
+                        # input3 = Add()([Lambda(lambda xm: xm * self.g.e_cj[key])(mu[(hop - 1, key[1])])
+                        #                 for key in self.g.e_cj.keys() if key[0] == n1])
                     output3 = self.layer_septa3(input3)
                     input_mu = Add()([output1, output3])
                 elif n1 == 'T':
                     output1 = self.layer_septa1_2(x[n1])
                     # conjunctive_previous-nodes
-                    input4 = Add()([self.g.e_cj[key] * mu[hop - 1][key[0]] for key in self.g.e_cj.keys() if key[1] == n1])
+                    # 지금 case에서는 self.g.e_cj[key] 가 모두 1이라서 안곱해줘도 됨.
+                    input4 = Add()([mu[(hop - 1, key[0])] for key in self.g.e_cj.keys() if key[1] == n1])
+                    # input4 = Add()([self.g.e_cj[key] * mu[(hop - 1, key[0])] for key in self.g.e_cj.keys() if key[1] == n1])
                     output4 = self.layer_septa4(input4)
                     input_mu = Add()([output1, output4])
                 else:
                     output1 = self.layer_septa1_1(x[n1])
                     # disjunctive nodes
                     if len(self.g.e_dj[n1]) == 1:
-                        input2 = tf.convert_to_tensor([mu[hop - 1][n2] for n2 in self.g.e_dj[n1]][0])  # n2: 자기 자신
+                        input2 = mu[(hop - 1, n1)]
                     else:
-                        input2 = Add()([mu[hop - 1][n2] for n2 in self.g.e_dj[n1]])
+                        input2 = Add()([mu[(hop - 1, n2)] for n2 in self.g.e_dj[n1]])
                     output2 = self.layer_septa2(input2)
                     # conjunctive_next-nodes
                     if sum(1 for key in self.g.e_cj.keys() if key[0] == n1) == 1:
-                        input3 = tf.convert_to_tensor([mu[hop - 1][key[1]] for key in self.g.e_cj.keys() if key[0] == n1][0])
+                        input3 = [mu[(hop - 1, key[1])] for key in self.g.e_cj.keys() if key[0] == n1][0]
                     else:
-                        input3 = Add()([self.g.e_cj[key] * mu[hop - 1][key[1]] for key in self.g.e_cj.keys() if key[0] == n1])
+                        for key in self.g.e_cj.keys():
+                            if key[0] == n1:
+                                temp_prob = self.g.e_cj[key]
+                                new_mu[(hop - 1, key[1])] = Lambda(lambda xm: xm * temp_prob)(mu[(hop - 1, key[1])])
+                        input3 = Add()([new_mu[(hop - 1, key[1])] for key in self.g.e_cj.keys() if key[0] == n1])
                     output3 = self.layer_septa3(input3)
                     # conjunctive_previous-nodes
-                    if sum(1 for key in self.g.e_cj.keys() if key[1] == n1) == 1:
-                        input4 = tf.convert_to_tensor([mu[hop - 1][key[0]] for key in self.g.e_cj.keys() if key[1] == n1][0])
-                    else:
-                        input4 = Add()([self.g.e_cj[key] * mu[hop - 1][key[0]] for key in self.g.e_cj.keys() if key[1] == n1])
+                    if sum(1 for key in self.g.e_cj.keys() if key[1] == n1) == 1:  # 100% 여기
+                        input4 = [mu[(hop - 1, key[0])] for key in self.g.e_cj.keys() if key[1] == n1][0]
+                    # else:  # 무조건 1개
+                        # input4 = Add()([self.g.e_cj[key] * mu[(hop - 1, key[0])] for key in self.g.e_cj.keys() if key[1] == n1])
+                        # input4 = Add()([mu[(hop - 1, key[0])] for key in self.g.e_cj.keys() if key[1] == n1])
                     output4 = self.layer_septa4(input4)
                     input_mu = Add()([output1, output2, output3, output4])
-                mu[hop][n1] = Activation('relu', name='act')(input_mu)
+                mu[(hop, n1)] = Activation('relu', name='act_hop%d_node%s' % (hop, n1))(input_mu)
 
             # # get layer
             # tmp_model = Model(inputs=mu, outputs=qhat)
@@ -150,11 +159,11 @@ class QNet(object):
         #
         #
 
-        input5 = Add()([mu[self.T][n] for n in self.g.n_x.keys()])
+        input5 = Add()([mu[(self.T, n)] for n in self.g.n_x.keys()])
         output5 = self.layer_septa5(input5)
         qhat = self.layer_septa6(output5)
 
-        self.model = Model(inputs=[x[n] for n in self.g.n_x.keys()] + [mu[0][n] for n in self.g.n_x.keys()],
+        self.model = Model(inputs=[x[n] for n in self.g.n_x.keys()] + [mu[(0, n)] for n in self.g.n_x.keys()],
                            outputs=qhat)
         self.model.compile(optimizer='adam', loss='mean_squared_error')
         checkpoint_path = self.model_dir  # "training_1/cp.ckpt"
@@ -261,7 +270,7 @@ class QNet(object):
                 del self.memory[0]
             self.memory.append((post_s_t_minus_n, reward, post_s_t, gamma))
             del self.short_memory[0]
-            if len(self.memory) % BATCH_SIZE == 0:
+            if len(self.memory) % 100 == 0:
                 print('memory_storage: ', len(self.memory))
 
     def train_model(self):
@@ -279,15 +288,22 @@ class QNet(object):
             y.append([r + gamma * self.model.predict(self.make_input_shape(s_t))[0][0]])
 
         self.cur_epoch += 1
-        # history = self.model.train_on_batch(x_train, [y])  # learning rate 지정해야.
-        history = self.model.fit(x_train, [y], batch_size=BATCH_SIZE, verbose=0, callbacks=[self.cp_callback])
-        # self.model.save(self.model_dir + 'model_epoch%d.h5' % self.cur_epoch)
 
-        self.loss_history.append(history.history['loss'][0])
-        if len(self.loss_history) >= 100:
-            if sum(self.loss_history[-100:][i] for i in range(100)) / 100 <= 200:
-                self.loss_history_warmup.append(history.history['loss'][0])
-        if self.cur_epoch % 10 == 0:
+        # train_on_batch로 돌리기
+        loss = self.model.train_on_batch(x_train, [y])  # learning rate 지정해야.
+        self.loss_history.append(loss)
+        if loss > 1000:
+            self.loss_history_zoomin.append(1050)
+        else:
+            self.loss_history_zoomin.append(loss)
+
+        # model.fit으로 돌리기
+        # history = self.model.fit(x_train, [y], batch_size=BATCH_SIZE, verbose=2, callbacks=[self.cp_callback])
+        # self.loss_history.append(history.history['loss'][0])
+
+        if (self.cur_epoch < 100 and self.cur_epoch % 10 == 0) or self.cur_epoch % 50 == 0:
+            self.model.save(self.model_dir + 'model_epoch%d.h5' % self.cur_epoch)
+            # 전체 Loss 그래프
             plt.plot(self.loss_history)
             plt.title('Model loss')
             plt.ylabel('Loss')
@@ -295,14 +311,14 @@ class QNet(object):
             plt.legend(['Train'], loc='upper left')
             plt.savefig(self.fig_dir + 'Epoch-{}.png'.format(self.cur_epoch))
             plt.close()
-            if len(self.loss_history_warmup) > 0:
-                plt.plot(self.loss_history_warmup)
-                plt.title('Model loss')
-                plt.ylabel('Loss')
-                plt.xlabel('Epoch')
-                plt.legend(['Train'], loc='upper left')
-                plt.savefig(self.fig_dir + 'warmup_Epoch-{}.png'.format(self.cur_epoch))
-                plt.close()
+            # Loss 1000 이상 짜른 Loss 그래프
+            plt.plot(self.loss_history_zoomin)
+            plt.title('Model loss')
+            plt.ylabel('Loss')
+            plt.xlabel('Epoch')
+            plt.legend(['Train'], loc='upper left')
+            plt.savefig(self.fig_dir + 'zoomin_Epoch-{}.png'.format(self.cur_epoch))
+            plt.close()
 
-        if len(self.loss_history) % 100 == 0:
-            print('avg_100/%d_loss: %.1f' % (len(self.loss_history), sum(self.loss_history[-100:][i] for i in range(100)) / 100))
+            if len(self.loss_history) >= 100:
+                print('avg_100/%d_loss: %.1f' % (len(self.loss_history), sum(self.loss_history[-100:][i] for i in range(100)) / 100))

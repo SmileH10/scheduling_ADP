@@ -108,21 +108,39 @@ class Job(object):
                 self.report['WT'].append(avg)
             else:
                 self.report['WT'].append(self.waiting_t)
+            # 최신 100개 기록
+            self.report['WT_100_raw'].append(self.waiting_t)
+            if len(self.report['WT_100_raw']) >= 100:
+                if len(self.report['WT_100_raw']) > 100:
+                    del self.report['WT_100_raw'][0]
+                assert len(self.report['WT_100_raw']) == 100
+                avg_100 = sum(self.report['WT_100_raw'][i] for i in range(100)) / 100
+                self.report['WT_100'].append(avg_100)
+                if avg_100 < self.report['best_100_wt']:
+                    self.report['best_100_wt'] = avg_100
+                    self.qnet.model.save(self.qnet.model_dir + 'best_100_wt_model.h5')
             # warmup 이후 평균 기록
             if self.simenv.now > 14 * (24 * 60 * 60):
                 if self.report['WT_warmup']:
                     avg = self.report['WT_warmup'][-1] * len(self.report['WT_warmup']) / (len(self.report['WT_warmup']) + 1) \
                           + self.waiting_t / (len(self.report['WT_warmup']) + 1)
                     self.report['WT_warmup'].append(avg)
+                    if avg < self.report['best_alltime_wt']:
+                        self.report['best_alltime_wt'] = avg
+                        self.qnet.model.save(self.qnet.model_dir + 'best_alltime_wt_model.h5')
                 else:
                     self.report['WT_warmup'].append(self.waiting_t)
-            # 전체 WT 그래프 기록
-            if len(self.report['WT']) % 100 == 0:
-                print("cur_t: %.1f(%dd-%dh-%dm-%ds)"
+                    self.report['best_alltime_wt'] = self.waiting_t
+
+            # # 그래프 기록
+            if len(self.report['WT']) % 100 == 0 and len(self.report['WT']) > 0:
+                print("\ncur_t: %.1f(%dd-%dh-%dm-%ds)"
                       % (self.simenv.now, self.simenv.now/(24*60*60), self.simenv.now%(24*60*60)/(60.0*60), self.simenv.now%(60*60)/60.0,
                          self.simenv.now % 60), end=' ')
                 print("WT_avg(%d jobs): %.2f" % (len(self.report['WT']), avg), end=' ')
-                print("Num jobs in system: %d" % self.report['num_job_in_system'])
+                if self.report['num_job_in_system'] == 0 or self.report['num_job_in_system'] > 100:
+                    print("Num jobs in system: %d" % self.report['num_job_in_system'])
+                # 전체 WT 그래프 기록
                 plt.plot(self.report['WT'])
                 plt.title('Model Results')
                 plt.ylabel('Avg. waiting time')
@@ -132,12 +150,21 @@ class Job(object):
                 plt.close()
                 # warmup 이후 WT 그래프 기록
                 if self.simenv.now > 14 * (24 * 60 * 60):
+                    print("warmup_WT_avg(%d jobs): %.2f" % (len(self.report['WT_warmup']), self.report['WT_warmup'][-1]), end=' ')
                     plt.plot(self.report['WT_warmup'])
                     plt.title('Model Results')
                     plt.ylabel('Avg. waiting time')
                     plt.xlabel('# job completed')
                     plt.savefig(self.fig_dir + 'warmup_Job-{}.png'.format(len(self.report['WT'])))
                     plt.close()
+                # 최신 100개 WT 그래프
+                print("WT_100: %.2f" % self.report['WT_100'][-1], end=' ')
+                plt.plot(self.report['WT_100'])
+                plt.title('Model Results (recent 100)')
+                plt.ylabel('Avg. waiting time')
+                plt.xlabel('# job completed')
+                plt.savefig(self.fig_dir + 'recent100_Job-{}.png'.format(len(self.report['WT'])))
+                plt.close()
 
     def run_mc(self, mc):
         mc_arrt = self.simenv.now

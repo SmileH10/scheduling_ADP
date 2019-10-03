@@ -9,8 +9,6 @@ from time import time
 from datetime import datetime
 import os
 
-
-ITERATION = 1
 NUM_JOBS = 100
 
 
@@ -65,12 +63,12 @@ def main(gd=False, prior_rule='SPT', load_ckpt=False, test=False):
     # if gd:
     #     gd = GraphicDisplay(mc_info['name'])
     if prior_rule == 'RL':
-        qnet = QNet(ptrn_info, mc_info, g, log_dir, ckpt=load_ckpt, test=test)  # qnet part 나중에 확인##########################
+        qnet = QNet(ptrn_info, mc_info, g, log_dir, load_ckpt=load_ckpt, test=test)  # qnet part 나중에 확인##########################
     else:
         qnet = False
 
     # 결과 기록 변수 생성
-    report = {'WT': [], 'WT_warmup': []}
+    report = {'WT': [], 'WT_warmup': [], 'WT_100_raw': [], 'WT_100': [], 'best_alltime_wt': float("inf"), 'best_100_wt': float("inf")}
 
     # 알고리즘 초기값 설정
     seed = 1
@@ -123,4 +121,4 @@ def main(gd=False, prior_rule='SPT', load_ckpt=False, test=False):
 
 if __name__ == '__main__':
     ckpt = r'C:\Users\weird\OneDrive - 연세대학교 (Yonsei University)\PycharmProjects_Dropbox\19ADP_EDscheduling\logs\RL-2019-09-30_17-46-18\model\cp.ckpt'
-    main(gd=False, prior_rule='RL', load_ckpt=ckpt, test=False)
+    main(gd=False, prior_rule='RL', load_ckpt=False, test=False)
