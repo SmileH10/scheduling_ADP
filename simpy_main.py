@@ -46,12 +46,17 @@ def sim_setup(simenv, prior_rule, sim_mcrsc, ptrn_info, mc_info, qnet, g, fig_di
             break
 
 
-def main(gd=False, prior_rule='SPT', load_ckpt=False, test=False):
+def main(gd=False, prior_rule='SPT', model=False, test=False):
     # 결과파일 출력 주소 지정
     print("RULE: ", prior_rule)
-    log_dir = "./logs/{}-{}/".format(prior_rule, datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
-    os.makedirs(log_dir)
-    fig_dir = log_dir + "output_fig/waiting_time/"
+    if not model:
+        log_dir = "./logs/{}-{}/".format(prior_rule, datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
+        os.makedirs(log_dir)
+        fig_dir = log_dir + "output_fig/waiting_time/"
+    else:
+        log_dir = model['save_dir']
+        os.makedirs(model['save_dir'])
+        fig_dir = log_dir + "waiting_time/"
     os.makedirs(fig_dir)
 
     # load data: ptrn/mc info
@@ -63,7 +68,7 @@ def main(gd=False, prior_rule='SPT', load_ckpt=False, test=False):
     # if gd:
     #     gd = GraphicDisplay(mc_info['name'])
     if prior_rule == 'RL':
-        qnet = QNet(ptrn_info, mc_info, g, log_dir, load_ckpt=load_ckpt, test=test)  # qnet part 나중에 확인##########################
+        qnet = QNet(ptrn_info, mc_info, g, log_dir, model=model, test=test)  # qnet part 나중에 확인##########################
     else:
         qnet = False
 
@@ -120,5 +125,9 @@ def main(gd=False, prior_rule='SPT', load_ckpt=False, test=False):
 
 
 if __name__ == '__main__':
-    ckpt = r'C:\Users\weird\OneDrive - 연세대학교 (Yonsei University)\PycharmProjects_Dropbox\19ADP_EDscheduling\logs\RL-2019-09-30_17-46-18\model\cp.ckpt'
-    main(gd=False, prior_rule='RL', load_ckpt=False, test=False)
+    model = {'name': 'model_epoch4900.h5'}  # best_100_wt_model.h5, model_epoch500.h5, best_alltime_wt_model.h5
+    model['load_dir'] = r'C:\Users\weird\OneDrive - 연세대학교 (Yonsei University)\PycharmProjects_Dropbox\19ADP_EDscheduling\logs\RL-2019-10-03_21-34-52\model\\'
+    model['save_dir'] = r'C:\Users\weird\OneDrive - 연세대학교 (Yonsei University)\PycharmProjects_Dropbox\19ADP_EDscheduling\logs\RL-2019-10-03_21-34-52\%s\\' % model['name'][:-3]
+    model['model'] = model['load_dir'] + model['name']
+
+    main(gd=False, prior_rule='RL', model=model, test=True)

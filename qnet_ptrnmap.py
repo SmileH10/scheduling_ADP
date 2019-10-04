@@ -6,7 +6,7 @@ Post-state (action 직후 변화하는 node 속성을 input으로 q-hat(output)�
 
 import tensorflow as tf
 from tensorflow.python.keras.layers import Input, Dense, Add, Activation, Lambda, Concatenate #, Multiply, Dot
-from tensorflow.python.keras.models import Model
+from tensorflow.python.keras.models import Model, load_model
 
 # import keras
 # from keras.layers import Input, Dense, Add  #, concatenate, Multiply, Dot
@@ -31,21 +31,20 @@ MEMORY_SIZE = 500000
 
 
 class QNet(object):
-    def __init__(self,  ptrn_info, mc_info, g, log_dir, load_ckpt=False, test=False):
+    def __init__(self,  ptrn_info, mc_info, g, log_dir, model=False, test=False):
         self.ptrn_info = ptrn_info
         self.mc_info = mc_info
         self.g = g
-        self.log_dir = log_dir
-        self.fig_dir = log_dir + "output_fig/model/"
-        self.model_dir = log_dir[2:] + "model/"
-        os.makedirs(self.fig_dir)
-        os.makedirs(self.model_dir)
-        self.ckpt = load_ckpt
+        if not test:
+            self.fig_dir = log_dir + "output_fig/model_loss/"
+            self.model_dir = log_dir[2:] + "trained_model/"
+            os.makedirs(self.fig_dir)
+            os.makedirs(self.model_dir)
         self.test = test
 
         self.T = 2
         self.embed_dim = 32
-        self.initialize_model()
+        self.initialize_model(model=model)
 
         self.epsilon = 0.05  # random action prob.
         self.short_memory = []
@@ -56,7 +55,12 @@ class QNet(object):
         self.loss_history = []
         self.loss_history_zoomin = []
 
-    def initialize_model(self):
+    def initialize_model(self, model=False):
+        if load_model:
+            print("loading QNet model..")
+            self.model = load_model(model['model'])
+            print("QNet model loaded")
+            return
         print("running QNet::initialize_model..")
         mu = {(0, nkey): Input(shape=(self.embed_dim,), name='mu_%d%s' % (0, nkey))
               for nkey in self.g.n_x.keys()}
@@ -170,10 +174,8 @@ class QNet(object):
         self.cp_callback = tf.keras.callbacks.ModelCheckpoint(checkpoint_path + "cp.ckpt",
                                                               save_weights_only=True,
                                                               verbose=1,
-                                                              period=50)
+                                                              period=100)
         # print(self.model.summary())
-        if self.ckpt:
-            self.model.load_weights(self.ckpt)
         print("ends QNet::initialize_model")
 
     @staticmethod
@@ -292,8 +294,8 @@ class QNet(object):
         # train_on_batch로 돌리기
         loss = self.model.train_on_batch(x_train, [y])  # learning rate 지정해야.
         self.loss_history.append(loss)
-        if loss > 1000:
-            self.loss_history_zoomin.append(1050)
+        if loss > 500:
+            self.loss_history_zoomin.append(550)
         else:
             self.loss_history_zoomin.append(loss)
 
@@ -301,7 +303,7 @@ class QNet(object):
         # history = self.model.fit(x_train, [y], batch_size=BATCH_SIZE, verbose=2, callbacks=[self.cp_callback])
         # self.loss_history.append(history.history['loss'][0])
 
-        if (self.cur_epoch < 100 and self.cur_epoch % 10 == 0) or self.cur_epoch % 50 == 0:
+        if (self.cur_epoch < 100 and self.cur_epoch % 10 == 0) or self.cur_epoch % 100 == 0:
             self.model.save(self.model_dir + 'model_epoch%d.h5' % self.cur_epoch)
             # 전체 Loss 그래프
             plt.plot(self.loss_history)

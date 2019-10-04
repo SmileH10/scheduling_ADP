@@ -116,7 +116,7 @@ class Job(object):
                 assert len(self.report['WT_100_raw']) == 100
                 avg_100 = sum(self.report['WT_100_raw'][i] for i in range(100)) / 100
                 self.report['WT_100'].append(avg_100)
-                if avg_100 < self.report['best_100_wt']:
+                if avg_100 < self.report['best_100_wt'] and not self.qnet.test:
                     self.report['best_100_wt'] = avg_100
                     self.qnet.model.save(self.qnet.model_dir + 'best_100_wt_model.h5')
             # warmup 이후 평균 기록
@@ -125,7 +125,7 @@ class Job(object):
                     avg = self.report['WT_warmup'][-1] * len(self.report['WT_warmup']) / (len(self.report['WT_warmup']) + 1) \
                           + self.waiting_t / (len(self.report['WT_warmup']) + 1)
                     self.report['WT_warmup'].append(avg)
-                    if avg < self.report['best_alltime_wt']:
+                    if avg < self.report['best_alltime_wt'] and not self.qnet.test:
                         self.report['best_alltime_wt'] = avg
                         self.qnet.model.save(self.qnet.model_dir + 'best_alltime_wt_model.h5')
                 else:
