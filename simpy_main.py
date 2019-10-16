@@ -1,15 +1,14 @@
 import simpy
 # from simulation_GUI import GraphicDisplay
-# from sim_ptrnmapGUI import PtrnMapGraphicDisplay
+# from sim_ptrnmapGUI import PtrnGraphicDisplay
 import numpy as np  # 나중에 random seed 설정할 때, proc_t 확률적으로 쓸 때
-from qnet_ptrnmap import QNet
+# from qnet_ptrnmap import QNet
+from qnet_ver1 import QNet
 from job import Job
 from dp_graph import DisjunctivePatternGraph
 from time import time
 from datetime import datetime
 import os
-
-NUM_JOBS = 100
 
 
 def load_job_features():
@@ -30,104 +29,214 @@ def load_job_features():
     return ptrn_info
 
 
-def sim_setup(simenv, prior_rule, sim_mcrsc, ptrn_info, mc_info, qnet, g, fig_dir, report):
+def sim_setup(args, simenv, sim_mcrsc, ptrn_info, mc_info, qnet, g, test):
     jobs = []
     jobid = 0
-    report['num_job_in_system'] = 0
+    args['report']['num_job_in_system'] = 0
+    if test:
+        sim_seed = args['test_id']
+    else:
+        sim_seed = 0
     while True:
-        jobs.append(Job(jobid, simenv, prior_rule, sim_mcrsc, ptrn_info, mc_info, g, fig_dir, report))
-        if prior_rule == 'RL':
+        jobs.append(Job(jobid, args, simenv, sim_mcrsc, ptrn_info, mc_info, g, test))
+        if args['prior_rule'] == 'RL':
             jobs[-1].qnet = qnet
         # interval time of arrival
+        sim_seed += 100
+        np.random.seed(seed=sim_seed)
         yield simenv.timeout(np.random.exponential((24 * 60 * 60) / sum(ptrn_info['freq'][ptrn] for ptrn in ptrn_info['name'])))
         jobid += 1
-        if jobid == 10000:
-            print("@@@@@****************************** %.2f ******************************@@@@@" % simenv.now)
-            break
 
 
-def main(gd=False, prior_rule='SPT', model=False, test=False):
-    # 결과파일 출력 주소 지정
-    print("RULE: ", prior_rule)
-    if not model:
-        log_dir = "./logs/{}-{}/".format(prior_rule, datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
-        os.makedirs(log_dir)
-        fig_dir = log_dir + "output_fig/waiting_time/"
+def main(args, test=False, model=False):
+    # 결과출력 dir 정하기
+    if not test:  # args['prior_rule'] == 'RL' 인 경우에만 생길 수 있음.
+        args['dir']['qnet_model_dir'] = args['dir']['instance_dir'] + "trained_model/"
+        args['dir']['wt_fig_dir'] = args['dir']['instance_dir'] + "RLtrain_fig_waiting_time/"
+        args['dir']['loss_fig_dir'] = args['dir']['instance_dir'] + "RLtrain_fig_model_loss/"
     else:
-        log_dir = model['save_dir']
-        os.makedirs(model['save_dir'])
-        fig_dir = log_dir + "waiting_time/"
-    os.makedirs(fig_dir)
+        args['dir']['test_dir'] = args['dir']['instance_dir'] + 'test\\test%d\\' % (args['test_id'])
+        if args['prior_rule'] == 'RL':
+            args['dir']['test_epoch_dir'] = args['dir']['test_dir'] + 'test_epoch_%s\\' % (model['load_epoch'])  #
+
+    # directory 생성
+    for key in args['dir'].keys():
+        if not os.path.exists(args['dir'][key]):
+            os.makedirs(args['dir'][key])
+        else:
+            if key == 'instance_dir' and not test:
+                raise Exception("INSTANCE DIR ALREADY EXISTS")
+            # else:
+            #     print("WARNING: " + str(key) + " ALREADY EXISTS")
+
+    # configuration 기록
+    if not test:
+        with open(args['dir']['instance_dir'] + 'config.txt', 'a') as file:
+            file.write("time_log: {}\n".format(datetime.now().strftime("%Y-%m-%d_%H-%M-%S")))
+            for key in args.keys():
+                if key != 'dir' and key != 'report':
+                    file.write("{}: {}\n".format(key, args[key]))
+    else:
+        with open(args['dir']['test_dir'] + 'config.txt', 'a') as file:
+            file.write("time_log: {}\n".format(datetime.now().strftime("%Y-%m-%d_%H-%M-%S")))
+            for key in args.keys():
+                if key != 'dir' and key != 'report':
+                    file.write("{}: {}\n".format(key, args[key]))
 
     # load data: ptrn/mc info
     mc_info = {'name': ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'I', 'J']}
     ptrn_info = load_job_features()
 
-    # load classes
-    g = DisjunctivePatternGraph(ptrn_info, mc_info)
-    # if gd:
-    #     gd = GraphicDisplay(mc_info['name'])
-    if prior_rule == 'RL':
-        qnet = QNet(ptrn_info, mc_info, g, log_dir, model=model, test=test)  # qnet part 나중에 확인##########################
-    else:
-        qnet = False
-
     # 결과 기록 변수 생성
-    report = {'WT': [], 'WT_warmup': [], 'WT_100_raw': [], 'WT_100': [], 'best_alltime_wt': float("inf"), 'best_100_wt': float("inf")}
+    args['report'] = {'WT': [], 'WT_warmup': [], 'best_alltime_wt': float("inf"), 'test_wt_raw': []}
 
     # 알고리즘 초기값 설정
-    seed = 1
-    start = time()
-
     # Iteration 초기값 설정
     simenv = simpy.Environment()
     sim_mcrsc = {mc: simpy.Resource(simenv, capacity=1) for mc in mc_info['name']}
-    if prior_rule == 'RL':
-        qnet.sim_mcrsc = sim_mcrsc  # qnet part 나중에 확인##########################
 
-    np.random.seed(seed=seed)
-    simenv.process(sim_setup(simenv, prior_rule, sim_mcrsc, ptrn_info, mc_info, qnet, g, fig_dir, report))
+    # Load classes
+    g = DisjunctivePatternGraph(args, ptrn_info, mc_info)
+    if args['prior_rule'] == 'RL':
+        qnet = QNet(args, ptrn_info, mc_info, g, simenv, model=model, test=test)  # qnet part 나중에 확인##########################
+    else:
+        qnet = False
 
-    while simenv.peek() < float("inf"):  # for i in range(1, 300): env.run(until=i)
+    simenv.process(sim_setup(args, simenv, sim_mcrsc, ptrn_info, mc_info, qnet, g, test=test))
+
+    while simenv.peek() < (args['WARMUP_DAYS'] + args['TEST_DAYS']) * (24*60*60):  # 42 * (24*60*60):  # while simenv.peek() < float("inf"): # for i in range(1, 300): env.run(until=i)
         simenv.step()
-
-        if gd:  # GUI sentence. e.g., progressbar.update(i)
-            gd_status = {'mc_users': {}, 'mc_queue': {}}
-            for mc in mc_info['name']:
-                gd_status['mc_users'][mc] = sim_mcrsc[mc].users[0].obj if len(sim_mcrsc[mc].users) > 0 else 'empty'
-            for mc in mc_info['name']:
-                if len(sim_mcrsc[mc].queue) > 0:
-                    gd_status['mc_queue'][mc] = {}
-                    for job in range(len(sim_mcrsc[mc].queue)):
-                        gd_status['mc_queue'][mc][job] = sim_mcrsc[mc].queue[job].obj
-                else:
-                    gd_status['mc_queue'][mc] = 'empty'
-            gd.save_status(n, simenv.now, gd_status)
     print("Simulation Complete")
-    # 시뮬레이션 1회 결과 기록
+    return args
 
-    # # job.py 보고나서 이 밑에서부터 다시 시작
-    # for id in range(NUM_JOBS):
-    #     Total_WT[n] += jobs[id].LoS
-    # LoS[n] = round(LoS[n] / 60.0, 2)  # minute으로 변환
-    if gd:
-        gd.event_cnt = 0
-    seed += 10
 
-    # print("All Simulations Complete. 소요시간: %.2f" % (time() - start))
-    # print("WT_sum(minutes): ", Total_WT)
-    # print("WT/patient(minutes): ", np.array(Total_WT) / NUM_JOBS)
-
-    # f = open("%s%s.csv" % (log_dir, 'filename'), "w")  # file_name.csv 파일 만들기
-    if gd:
-        gd.run_reset()
-        gd.mainloop()
+def write_data(args, data, opt):
+    if opt == 'summary':
+        f = open("%s%s.csv" % (args['dir']['instance_dir'] + 'test\\', 'summary.csv'), "w")
+        f.write("test_id, avg_WT\n")
+        for key_testid in data.keys():
+            f.write("%d, %.1f,\n" % (key_testid, data[key_testid]['avg_WT']))
+        f.write("AVG, %.1f" % (sum(data[key_testid]['avg_WT'] for key_testid in data.keys()) / len(list(data.keys()))))
+        f.close()
+    elif opt == 'epoch':
+        f = open("%s%s.csv" % (args['dir']['instance_dir'] + 'test\\', 'epoch.csv'), "w")
+        f.write("test_id, epoch, avg_WT\n")
+        for key_testid in data.keys():
+            for key in data[key_testid].keys():
+                if key[0] == 'e':
+                    f.write('%d, %s, %.1f,\n' % (key_testid, key, data[key_testid][key]['avg_WT']))
+        f.close()
+        f = open("%s%s.csv" % (args['dir']['instance_dir'] + 'test\\', 'epoch_summary.csv'), "w")
+        f.write("epoch, avg_WT\n")
+        sumval = 0.0
+        cnt = 0
+        for key in data[0].keys():
+            if key[0] == 'e':
+                avg = sum(data[key_testid][key]['avg_WT'] for key_testid in data.keys()) / len(list(data.keys()))
+                f.write("%s, %.1f,\n" % (key, avg))
+                sumval += avg
+                cnt += 1
+        f.write("AVG, %.1f" % (sumval/cnt))
+        f.close()
+    elif opt == 'detail':
+        f = open("%s%s.csv" % (args['dir']['test_dir'], 'wt_detail.csv'), "w")
+        f.write("wt_raw,\n")
+        for i in range(len(data[args['test_id']]['test_wt_raw'])):
+            f.write("%.1f,\n" % data[args['test_id']]['test_wt_raw'][i])
+        f.close()
+    elif opt == 'epoch_detail':
+        f = open("%s%s.csv" % (args['dir']['test_epoch_dir'], 'wt_detail.csv'), "w")
+        f.write("wt_raw,\n")
+        if args['name'] == 'best':
+            for i in range(len(data[args['test_id']]['test_wt_raw'])):
+                f.write("%.1f,\n" % data[args['test_id']]['test_wt_raw'][i])
+        else:
+            for i in range(len(data[args['test_id']][args['name']]['test_wt_raw'])):
+                f.write("%.1f,\n" % data[args['test_id']][args['name']]['test_wt_raw'][i])
+        f.close()
 
 
 if __name__ == '__main__':
-    model = {'name': 'model_epoch4900.h5'}  # best_100_wt_model.h5, model_epoch500.h5, best_alltime_wt_model.h5
-    model['load_dir'] = r'C:\Users\weird\OneDrive - 연세대학교 (Yonsei University)\PycharmProjects_Dropbox\19ADP_EDscheduling\logs\RL-2019-10-03_21-34-52\model\\'
-    model['save_dir'] = r'C:\Users\weird\OneDrive - 연세대학교 (Yonsei University)\PycharmProjects_Dropbox\19ADP_EDscheduling\logs\RL-2019-10-03_21-34-52\%s\\' % model['name'][:-3]
-    model['model'] = model['load_dir'] + model['name']
+    args = {'prior_rule': 'RL',
+            'WARMUP_DAYS': 0.5,
+            'TEST_DAYS': 0.1,
+            'MEMORY_SIZE': 2000,
+            'NSTEP': 5,
+            'BATCH_SIZE': 64,
+            'dir': {}
+            }
+    print("RULE: ", args['prior_rule'])
 
-    main(gd=False, prior_rule='RL', model=model, test=True)
+    avg_util_list = [0.6, 0.75, 0.9]
+    avg_util_list = [0.75]
+    num_scenario = 1  # avg_util = 0.xx 가 주어졌을 때, 몇 가지 proct variation을 만들 것인가?
+    num_test = 1  # 28일 wamrup + 28일 결과기록 test: 몇 번 반복할 것인가?
+
+    for util_id in avg_util_list:
+        for sce_id in range(num_scenario):
+            print("INSTANCE UTIL: %.2f, SCENARIO: %d" % (util_id, sce_id))
+            # instance 생성
+            args['util_id'] = util_id
+            args['sce_id'] = sce_id
+            args['dir']['instance_dir'] = "./logs/{}-util{}-sce{}/".format(args['prior_rule'], args['util_id'], args['sce_id'])
+            # if args['prior_rule'] == 'RL':
+            #     # RL은 학습 필요
+            #     args_return = main(args=args, test=False, model=False)
+            #     print("TRAINING ENDS. TEST STARTS...")
+            # # TEST
+            data = {}
+            # RL인 경우
+            if args['prior_rule'] == 'RL':
+                model = {'load_epoch': 'best'}
+                model['model_loaded'] = args['dir']['instance_dir'] + 'trained_model\\best_alltime_wt_model.h5'
+                # print("EPOCH BEST STARTS...")
+                for test_id in range(num_test + 1):
+                    args['test_id'] = test_id
+                    # print("TEST %d STARTS..." % test_id)
+                    args_return = main(args=args, model=model, test=True)
+                    data[test_id] = {'avg_WT': args_return['report']['WT_warmup'][-1], 'test_wt_raw': args_return['report']['test_wt_raw']}
+                    args_return['name'] = 'best'
+                    args_return['test_id'] = test_id
+                    write_data(args_return, data, opt='epoch_detail')
+                i = 1
+                while True:
+                    model = {'load_epoch': 50 * i}
+                    model['model_loaded'] = args['dir']['instance_dir'] + 'trained_model\model_epoch%d.h5' % model['load_epoch']
+                    if not os.path.exists(model['model_loaded']):
+                        break
+                    # print("EPOCH %d STARTS..." % model['load_epoch'])
+                    for test_id in range(num_test + 1):
+                        args['test_id'] = test_id
+                        # print("TEST %d STARTS..." % test_id)
+                        args_return = main(args=args, model=model, test=True)
+                        data[test_id]['epoch' + str(model['load_epoch'])] = \
+                            {'avg_WT': args_return['report']['WT_warmup'][-1], 'test_wt_raw': args_return['report']['test_wt_raw']}
+                        args_return['name'] = 'epoch' + str(model['load_epoch'])
+                        args_return['test_id'] = test_id
+                        write_data(args_return, data, opt='epoch_detail')
+                    i += 1
+            else:
+                # 기타 다른 dispatching rules (SPT, FCFS 등)
+                for test_id in range(num_test + 1):
+                    args['test_id'] = test_id
+                    # print("TEST %d STARTS..." % test_id)
+                    args_return = main(args=args, model=False, test=True)
+                    data[test_id] = {'avg_WT': args_return['report']['WT_warmup'][-1], 'test_wt_raw': args_return['report']['test_wt_raw']}
+                    args_return['test_id'] = test_id
+                    write_data(args_return, data, opt='detail')
+
+            write_data(args_return, data, opt='summary')
+            if args['prior_rule'] == 'RL':
+                write_data(args_return, data, opt='epoch')
+
+
+
+    # # 'C:\Users\Aidan\OneDrive - 연세대학교 (Yonsei University)\PycharmProjects_Dropbox\19ADP_EDscheduling\logs\RL-is1-2019-10-10_17-32-57_dim64_T3'
+    # model['memory_name'] = 'trained_model\memory_epoch%d.json' % model['load_epoch']
+    # model['instance_dir'] = r'.\logs\RL-is1-2019-10-10_17-32-57_dim64_T3\\'
+    # model['memory_loaded'] = model['load_dir'] + model['memory_name']
+    # # 이어서 Training 할 때
+    # # else:
+    # #     model['save_moretrain_dir'] = model['instance_dir'] + 'train_from_model_epoch%d\\' % model['load_epoch']
+    #
+    # # input: model / 문제(proct) scenario 번호(개수 말고) / test 횟수(arrival/proct/oper prob.)

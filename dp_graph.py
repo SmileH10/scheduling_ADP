@@ -3,7 +3,7 @@ from collections import OrderedDict
 
 
 class DisjunctivePatternGraph(object):
-    def __init__(self, ptrn_info, mc_info):
+    def __init__(self, args, ptrn_info, mc_info):
         self.n_x = OrderedDict()
         self.e_cj = {}
         self.e_dj = {}
@@ -11,8 +11,8 @@ class DisjunctivePatternGraph(object):
         self.n_features = ['srvd', 'rsvd', 'wait', 'proct']
         self.make_initial_graph(ptrn_info)
         self.set_st_nodes()
-        util = {mc: 0.7 for mc in mc_info['name']}
-        self.proct = self.make_initial_proct(ptrn_info, mc_info, util)
+        util = {mc: args['util_id'] for mc in mc_info['name']}
+        self.proct = self.make_initial_proct(ptrn_info, mc_info, util, scale=0.5, proct_instance=args['sce_id'])
 
     def set_st_nodes(self):
         self.n_x['S'] = [1, 0]
@@ -48,8 +48,9 @@ class DisjunctivePatternGraph(object):
         for n in self.n_x.keys():
             self.e_dj[n] = [n2 for n2 in self.n_x.keys() if n2[-1] == n[-1]]
 
-    def make_initial_proct(self, ptrn_info, mc_info, util, scale=0.05):    # 평균 근처에서 다들 비슷하게 하는 건 별로..
+    def make_initial_proct(self, ptrn_info, mc_info, util, scale, proct_instance):    # 평균 근처에서 다들 비슷하게 하는 건 별로..
         # self.proct[n] 만들기
+        np.random.seed(814 * (1 + proct_instance))
         proct = {}
         for mc in mc_info['name']:
             n_with_same_mc = [n for n in self.n_x.keys() if n[-1] == mc]
@@ -67,4 +68,5 @@ class DisjunctivePatternGraph(object):
                         break
             for n in n_with_same_mc:
                 self.n_x[n]['proct'] = proct[n]
+            # print('mc: %s / ' % mc, ["%.1f" % proct[n] for n in n_with_same_mc])
         return proct
